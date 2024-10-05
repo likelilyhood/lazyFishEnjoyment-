@@ -1,0 +1,1204 @@
+ cv::matchTemplate(gray_filtered_src, template_Hammer, template_Hammer, cv::TM_CCOEFF_NORMED);
+        double minVal_Hammer, maxVal_Hammer;
+        cv::Point minLoc_Hammer, maxLoc_Hammer;
+        cv::minMaxLoc(template_Hammer, &minVal_Hammer, &maxVal_Hammer, &minLoc_Hammer, &maxLoc_Hammer);
+        if (maxVal_Hammer > 0.5)
+        {
+          // 在“R”标位置绘制矩形进行标注
+            int rectWidth_h = template_Hammer.cols * 0.03; // 新的宽度，这里假设为原来的两倍
+            int rectHeight_h = template_Hammer.rows * 0.04; // 新的高度，这里假设为原来的两倍
+            cv::rectangle(filtered_src, maxLoc_Hammer, cv::Point(maxLoc_Hammer.x + rectWidth_h, maxLoc_Hammer.y + rectHeight_h), cv::Scalar(0, 255, 0), 2);
+            cout<<"succeed！"<<endl;
+        }
+        else {cout<<"failed"<<endl;}
+
+
+#include "windmill.hpp"
+
+using namespace std;
+using namespace cv;
+
+int main()
+{
+    std::chrono::milliseconds t = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch());
+    WINDMILL::WindMill wm(t.count());
+    cv::Mat src;
+    while (1)
+    {
+        t = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch());
+        src = wm.getMat((double)t.count()/1000);
+        
+        //==========================代码区========================//
+        
+        cv::Mat filtered_src;
+        cv::GaussianBlur(src, filtered_src, cv::Size(5, 5), 1.5);
+        //先对元图像进行高斯滤波处理，突出R和Hammer的特征
+        //继续进行二值转化
+        cv::Mat binary_filtered_src;
+        cv::threshold(filtered_src, binary_filtered_src, 127, 255, cv::THRESH_BINARY);
+        //std::cout << "二值化后图像类型：" << binary_filtered_src.type() << std::endl;解决contourArea函数的应用问题
+
+         // 对滤波后的图像进行灰度处理
+        cv::Mat gray_filtered_src;
+        cv::cvtColor(filtered_src, gray_filtered_src, cv::COLOR_BGR2GRAY);
+        /*本段代码即是方法一，在图像标注时空间占用较大
+        // 尝试识别“R”标和hammer
+        cv::Mat template_R;
+        cv::Mat template_Hammer;
+        cv::Mat gray_template_R;
+        cv::Mat gray_template_Hammer;
+        template_R = cv::imread("../task/image/R.png", cv::IMREAD_GRAYSCALE);
+        template_Hammer =cv::imread("../task/image/target.png",cv::IMREAD_GRAYSCALE);
+
+        
+        if (template_R.rows > binary_filtered_src.rows || template_R.cols > binary_filtered_src.cols)
+        {
+            double scale = std::min(static_cast<double>(binary_filtered_src.rows) / template_R.rows, static_cast<double>(binary_filtered_src.cols) / template_R.cols);
+            cv::resize(template_R, template_R, cv::Size(), scale, scale);
+        }
+
+        cv::matchTemplate(gray_filtered_src, template_R, template_R, cv::TM_CCOEFF_NORMED);
+        double minVal, maxVal;
+        cv::Point minLoc, maxLoc;
+        cv::minMaxLoc(template_R, &minVal, &maxVal, &minLoc, &maxLoc);
+        if (maxVal > 0.9)
+        {
+          // 在“R”标位置绘制矩形进行标注
+            int rectWidth = template_R.cols * 0.03; // 新的宽度，这里假设为原来的两倍
+            int rectHeight = template_R.rows * 0.04; // 新的高度，这里假设为原来的两倍
+            cv::rectangle(filtered_src, maxLoc, cv::Point(maxLoc.x + rectWidth, maxLoc.y + rectHeight), cv::Scalar(0, 255, 0), 2);
+            cout<<"succeed！"<<endl;
+        }
+        else {cout<<"failed"<<endl;}
+
+        */
+    
+    
+    if (binary_filtered_src.channels() > 1)
+        {
+            cv::cvtColor(binary_filtered_src, binary_filtered_src, cv::COLOR_BGR2GRAY);
+        }
+
+        // 确保是 CV_8UC1 类型用于轮廓检测
+        cv::Mat imageForContours = binary_filtered_src.clone();
+        if (imageForContours.type()!= CV_8UC1)
+        {
+            imageForContours.convertTo(imageForContours, CV_8UC1);
+        }
+
+        // 轮廓检测
+        std::vector<std::vector<cv::Point>> contours;
+        std::vector<cv::Vec4i> hierarchy;
+        cv::findContours(imageForContours, contours, hierarchy, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+
+        std::vector<cv::Point> centerPoints;//储存找到的中心点
+
+
+       for (size_t i = 0; i < contours.size(); i++)
+        {
+            double area = cv::contourArea(contours[i]);
+            if (area > 4000 && area < 5000)
+            {
+                cv::Rect boundingRect = cv::boundingRect(contours[i]);
+                cv::rectangle(filtered_src, boundingRect, cv::Scalar(0, 255, 0), 2);
+
+                 cv::Moments moments = cv::moments(contours[i]);
+                int cX = static_cast<int>(moments.m10 / moments.m00);
+                int cY = static_cast<int>(moments.m01 / moments.m00);
+                centerPoints.push_back(cv::Point(cX, cY));
+
+                // 绘制蓝色中心点
+                cv::circle(filtered_src, cv::Point(cX, cY), 3, cv::Scalar(255, 0, 0), -1);
+            }
+            if (area < 170)
+            {
+                cv::drawContours(filtered_src, contours, i, cv::Scalar(0, 255, 0), 1);
+                 cv::Moments moments = cv::moments(contours[i]);
+                int cX = static_cast<int>(moments.m10 / moments.m00);
+                int cY = static_cast<int>(moments.m01 / moments.m00);
+            centerPoints.push_back(cv::Point(cX, cY));
+
+                // 绘制蓝色中心点
+                cv::circle(filtered_src, cv::Point(cX, cY), 3, cv::Scalar(255, 0, 0), -1);
+
+            }
+        }
+        if (centerPoints.size() == 2)
+        {
+            cv::Point midPoint((centerPoints[0].x + centerPoints[1].x) / 2, (centerPoints[0].y + centerPoints[1].y) / 2);
+            cv::circle(filtered_src, midPoint, 3, cv::Scalar(255, 255, 0), -1);
+        }
+
+    imshow("windmill", filtered_src);
+       
+
+
+        //=======================================================//
+        
+        waitKey(1);
+    }
+}
+
+#include "windmill.hpp"
+#include <iostream>
+#include <chrono>
+#include <opencv2/opencv.hpp>
+
+int main() {
+    std::chrono::milliseconds t = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch());
+    WINDMILL::WindMill wm(t.count());
+    cv::Mat src;
+    cv::Point fispoint;
+    cv::Point secpoint;
+    bool foundFirstPoint = false;
+    bool foundSecondPoint = false;
+
+    while (true) {
+        t = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch());
+        src = wm.getMat((double)t.count() / 1000);
+
+        //==========================代码区========================//
+
+        cv::Mat filtered_src;
+        cv::GaussianBlur(src, filtered_src, cv::Size(5, 5), 1.5);
+        // 先对元图像进行高斯滤波处理，突出 R 和 Hammer 的特征
+        // 继续进行二值转化
+        cv::Mat binary_filtered_src;
+        cv::threshold(filtered_src, binary_filtered_src, 127, 255, cv::THRESH_BINARY);
+
+        // 对滤波后的图像进行灰度处理
+        cv::Mat gray_filtered_src;
+        cv::cvtColor(filtered_src, gray_filtered_src, cv::COLOR_BGR2GRAY);
+
+        if (binary_filtered_src.channels() > 1) {
+            cv::cvtColor(binary_filtered_src, binary_filtered_src, cv::COLOR_BGR2GRAY);
+        }
+
+        // 确保是 CV_8UC1 类型用于轮廓检测
+        cv::Mat imageForContours = binary_filtered_src.clone();
+        if (imageForContours.type()!= CV_8UC1) {
+            imageForContours.convertTo(imageForContours, CV_8UC1);
+        }
+
+        // 轮廓检测
+        std::vector<std::vector<cv::Point>> contours;
+        std::vector<cv::Vec4i> hierarchy;
+        cv::findContours(imageForContours, contours, hierarchy, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+
+        for (size_t i = 0; i < contours.size(); i++) {
+            double area = cv::contourArea(contours[i]);
+            if (area > 4000 && area < 5000) {
+                cv::Rect boundingRect = cv::boundingRect(contours[i]);
+                cv::rectangle(filtered_src, boundingRect, cv::Scalar(0, 255, 0), 2);
+
+                cv::Moments moments = cv::moments(contours[i]);
+                int cX = static_cast<int>(moments.m10 / moments.m00);
+                int cY = static_cast<int>(moments.m01 / moments.m00);
+                fispoint = cv::Point(cX, cY);
+                cv::circle(filtered_src, cv::Point(cX, cY), 3, cv::Scalar(255, 0, 0), -1);
+            }
+            if (area < 170) {
+                cv::drawContours(filtered_src, contours, i, cv::Scalar(0, 255, 0), 1);
+                cv::Moments moments = cv::moments(contours[i]);
+                int cX = static_cast<int>(moments.m10 / moments.m00);
+                int cY = static_cast<int>(moments.m01 / moments.m00);
+                secpoint = cv::Point(cX, cY);
+                cv::circle(filtered_src, cv::Point(cX, cY), 3, cv::Scalar(255, 0, 0), -1);
+            }
+        }
+
+        imshow("windmill", filtered_src);
+
+        //=======================================================//
+
+        cv::waitKey(1);
+    }
+}
+
+
+
+
+// 重载风车转速公式，用于 Ceres Solver 的 Jet 类型
+template <typename T>
+T windmillSpeed(const T A, const T w, const T phi, const T b, const T t) {
+    return A * ceres::cos(w * t + phi) + b;
+}
+
+struct ResidualFunctor {
+    ResidualFunctor(double t, double trueSpeed) : t_(t), trueSpeed_(trueSpeed) {}
+
+    template <typename T>
+    bool operator()(const T* const parameters, T* residual) const {
+        const T A = parameters[0];
+        const T w = parameters[1];
+        const T phi = parameters[2];
+        const T b = parameters[3];
+        T predictedSpeed;
+        // 显式指定模板参数为 ceres::Jet<double, 4>
+        predictedSpeed = windmillSpeed<T>(A, w, phi, b, static_cast<T>(t_));
+        residual[0] = trueSpeed_ - predictedSpeed;
+        return true;
+    }
+
+#include "windmill.hpp"
+#include <iostream>
+#include <chrono>
+#include <opencv2/opencv.hpp>
+#include <ceres/ceres.h>
+
+// 定义残差函数，这里假设运动轨迹为 y = A * sin(B * x + C) + D
+struct CostFunctor {
+    CostFunctor(double x, double y) : x_(x), y_(y) {}
+
+    template <typename T>
+    bool operator()(const T* const parameters, T* residual) const {
+        const T A = parameters[0];
+        const T B = parameters[1];
+        const T C = parameters[2];
+        const T D = parameters[3];
+        residual[0] = y_ - (A * ceres::sin(B * x_ + C) + D);
+        return true;
+    }
+
+private:
+    const double x_;
+    const double y_;
+};
+
+int main() {
+    std::chrono::milliseconds t = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch());
+    WINDMILL::WindMill wm(t.count());
+    cv::Mat src;
+    std::vector<std::pair<double, cv::Point>> midPointsData;
+
+    while (1) {
+        t = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch());
+        src = wm.getMat((double)t.count() / 1000);
+
+        //==========================代码区========================//
+
+        cv::Mat filtered_src;
+        cv::GaussianBlur(src, filtered_src, cv::Size(5, 5), 1.5);
+        // 先对元图像进行高斯滤波处理，突出 R 和 Hammer 的特征
+        // 继续进行二值转化
+        cv::Mat binary_filtered_src;
+        cv::threshold(filtered_src, binary_filtered_src, 127, 255, cv::THRESH_BINARY);
+
+        // 对滤波后的图像进行灰度处理
+        cv::Mat gray_filtered_src;
+        cv::cvtColor(filtered_src, gray_filtered_src, cv::COLOR_BGR2GRAY);
+
+        if (binary_filtered_src.channels() > 1) {
+            cv::cvtColor(binary_filtered_src, binary_filtered_src, cv::COLOR_BGR2GRAY);
+        }
+
+        // 确保是 CV_8UC1 类型用于轮廓检测
+        cv::Mat imageForContours = binary_filtered_src.clone();
+        if (imageForContours.type()!= CV_8UC1) {
+            imageForContours.convertTo(imageForContours, CV_8UC1);
+        }
+
+        // 轮廓检测
+        std::vector<std::vector<cv::Point>> contours;
+        std::vector<cv::Vec4i> hierarchy;
+        cv::findContours(imageForContours, contours, hierarchy, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+
+        std::vector<cv::Point> centerPoints; // 储存找到的中心点
+
+        for (size_t i = 0; i < contours.size(); i++) {
+            double area = cv::contourArea(contours[i]);
+            if (area > 4000 && area < 5000) {
+                cv::Rect boundingRect = cv::boundingRect(contours[i]);
+                cv::rectangle(filtered_src, boundingRect, cv::Scalar(0, 255, 0), 2);
+
+                cv::Moments moments = cv::moments(contours[i]);
+                int cX = static_cast<int>(moments.m10 / moments.m00);
+                int cY = static_cast<int>(moments.m01 / moments.m00);
+                centerPoints.push_back(cv::Point(cX, cY));
+
+                // 绘制蓝色中心点
+                cv::circle(filtered_src, cv::Point(cX, cY), 3, cv::Scalar(255, 0, 0), -1);
+            }
+            if (area < 170) {
+                cv::drawContours(filtered_src, contours, i, cv::Scalar(0, 255, 0), 1);
+                cv::Moments moments = cv::moments(contours[i]);
+                int cX = static_cast<int>(moments.m10 / moments.m00);
+                int cY = static_cast<int>(moments.m01 / moments.m00);
+                centerPoints.push_back(cv::Point(cX, cY));
+
+                // 绘制蓝色中心点
+                cv::circle(filtered_src, cv::Point(cX, cY), 3, cv::Scalar(255, 0, 0), -1);
+            }
+        }
+        if (centerPoints.size() == 2) {
+            cv::Point midPoint((centerPoints[0].x + centerPoints[1].x) / 2, (centerPoints[0].y + centerPoints[1].y) / 2);
+            cv::circle(filtered_src, midPoint, 3, cv::Scalar(255, 255, 0), -1);
+
+            // 将中点数据添加到用于拟合的数据集中
+            midPointsData.push_back(std::make_pair(t.count(), midPoint));
+        }
+
+        imshow("windmill", filtered_src);
+
+        //waitKey(1);
+    }
+
+    // 使用 Ceres 进行拟合
+    ceres::Problem problem;
+    double parameters[4] = {1.0, 1.0, 1.0, 1.0};
+    for (const auto& data : midPointsData) {
+        ceres::CostFunction* cost_function =
+            new ceres::AutoDiffCostFunction<CostFunctor, 1, 4>(
+                new CostFunctor(data.first, data.second.y));
+        problem.AddResidualBlock(cost_function, nullptr, parameters);
+    }
+
+    // 配置求解器选项
+    ceres::Solver::Options options;
+    options.minimizer_progress_to_stdout = false;
+    options.linear_solver_type = ceres::DENSE_QR;
+    options.max_num_iterations = 100;
+
+    // 求解问题
+    ceres::Solver::Summary summary;
+    ceres::Solve(options, &problem, &summary);
+
+    std::cout << "优化结果：" << std::endl;
+    std::cout << "A = " << parameters[0] << std::endl;
+    std::cout << "B = " << parameters[1] << std::endl;
+    std::cout << "C = " << parameters[2] << std::endl;
+    std::cout << "D = " << parameters[3] << std::endl;
+
+    return 0;
+}
+
+   
+
+
+   #include "windmill.hpp"
+#include <iostream>
+#include <chrono>
+#include <opencv2/opencv.hpp>
+#include <ceres/ceres.h>
+
+// 定义残差函数，这里假设运动轨迹为 y = A * sin(B * x + C) + D
+struct CostFunctor {
+    CostFunctor(double x, double y) : x_(x), y_(y) {}
+
+    template <typename T>
+    bool operator()(const T* const parameters, T* residual) const {
+        const T A = parameters[0];
+        const T B = parameters[1];
+        const T C = parameters[2];
+        const T D = parameters[3];
+        residual[0] = y_ - (A * ceres::sin(B * x_ + C) + D);
+        return true;
+    }
+
+private:
+    const double x_;
+    const double y_;
+};
+
+int main() {
+    double trueValue = 0.785;
+    double tolerance = trueValue * 0.05;
+
+    int numIterations = 10;
+    std::vector<double> timesForIterations;
+
+    for (int iter = 0; iter < numIterations; ++iter) {
+        std::chrono::milliseconds startTime = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch());
+        std::chrono::milliseconds t = startTime;
+        WINDMILL::WindMill wm(t.count());
+        cv::Mat src;
+        std::vector<std::pair<double, cv::Point>> midPointsData;
+        int p = 1;
+        double A_init = 2.0;
+        double B_init = 1.0;
+        double C_init = 2.0;
+        double D_init = 1.0;
+        double parameters[4] = {A_init, B_init, C_init, D_init};
+       
+        while (p<100) {
+            p++;
+            t = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch());
+            src = wm.getMat((double)t.count() / 1000);
+
+            //==========================代码区========================//
+
+            cv::Mat filtered_src;
+            cv::GaussianBlur(src, filtered_src, cv::Size(5, 5), 1.5);
+            // 先对元图像进行高斯滤波处理，突出 R 和 Hammer 的特征
+            // 继续进行二值转化
+            cv::Mat binary_filtered_src;
+            cv::threshold(filtered_src, binary_filtered_src, 127, 255, cv::THRESH_BINARY);
+
+            // 对滤波后的图像进行灰度处理
+            cv::Mat gray_filtered_src;
+            cv::cvtColor(filtered_src, gray_filtered_src, cv::COLOR_BGR2GRAY);
+
+            if (binary_filtered_src.channels() > 1) {
+                cv::cvtColor(binary_filtered_src, binary_filtered_src, cv::COLOR_BGR2GRAY);
+            }
+
+            // 确保是 CV_8UC1 类型用于轮廓检测
+            cv::Mat imageForContours = binary_filtered_src.clone();
+            if (imageForContours.type()!= CV_8UC1) {
+                imageForContours.convertTo(imageForContours, CV_8UC1);
+            }
+
+            // 轮廓检测
+            std::vector<std::vector<cv::Point>> contours;
+            std::vector<cv::Vec4i> hierarchy;
+            cv::findContours(imageForContours, contours, hierarchy, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+
+            std::vector<cv::Point> centerPoints; // 储存找到的中心点
+
+            for (size_t i = 0; i < contours.size(); i++) {
+                double area = cv::contourArea(contours[i]);
+                if (area > 4000 && area < 5000) {
+                    cv::Rect boundingRect = cv::boundingRect(contours[i]);
+                    cv::rectangle(filtered_src, boundingRect, cv::Scalar(0, 255, 0), 2);
+
+                    cv::Moments moments = cv::moments(contours[i]);
+                    int cX = static_cast<int>(moments.m10 / moments.m00);
+                    int cY = static_cast<int>(moments.m01 / moments.m00);
+                    centerPoints.push_back(cv::Point(cX, cY));
+
+                    // 绘制蓝色中心点
+                    cv::circle(filtered_src, cv::Point(cX, cY), 3, cv::Scalar(255, 0, 0), -1);
+                }
+                if (area < 170) {
+                    cv::drawContours(filtered_src, contours, i, cv::Scalar(0, 255, 0), 1);
+                    cv::Moments moments = cv::moments(contours[i]);
+                    int cX = static_cast<int>(moments.m10 / moments.m00);
+                    int cY = static_cast<int>(moments.m01 / moments.m00);
+                    centerPoints.push_back(cv::Point(cX, cY));
+
+                    // 绘制蓝色中心点
+                    cv::circle(filtered_src, cv::Point(cX, cY), 3, cv::Scalar(255, 0, 0), -1);
+                }
+            }
+            if (centerPoints.size() == 2) {
+                cv::Point midPoint((centerPoints[0].x + centerPoints[1].x) / 2, (centerPoints[0].y + centerPoints[1].y) / 2);
+                cv::circle(filtered_src, midPoint, 3, cv::Scalar(255, 255, 0), -1);
+
+                // 将中点数据添加到用于拟合的数据集中
+                midPointsData.push_back(std::make_pair(t.count(), midPoint));
+            }
+
+            // 使用 Ceres 进行拟合
+            ceres::Problem problem;
+            for (const auto& data : midPointsData) {
+                ceres::CostFunction* cost_function =
+                    new ceres::AutoDiffCostFunction<CostFunctor, 1, 4>(
+                        new CostFunctor(data.first, data.second.y));
+                problem.AddResidualBlock(cost_function, nullptr, parameters);
+            }
+
+            // 配置求解器选项
+            ceres::Solver::Options options;
+            options.minimizer_progress_to_stdout = false;
+            options.linear_solver_type = ceres::DENSE_QR;
+            options.max_num_iterations = 100;
+
+            // 求解问题
+            ceres::Solver::Summary summary;
+            ceres::Solve(options, &problem, &summary);
+
+            double fittedValue = parameters[0] * std::sin(parameters[1] * t.count() + parameters[2]) + parameters[3];
+            double difference = std::abs(fittedValue - trueValue);
+            if (difference <= tolerance) {
+                std::cout<<"succeed<<endl";
+            }
+        }
+
+        std::chrono::milliseconds endTime = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch());
+        double elapsedTime = (endTime.count() - startTime.count()) / 1000.0;
+        timesForIterations.push_back(elapsedTime);
+
+        std::cout << "Iteration " << iter << " - Fitted values: A = " << parameters[0] << ", B = " << parameters[1]
+                  << ", C = " << parameters[2] << ", D = " << parameters[3] << std::endl;
+    }
+
+    double totalTime = 0.0;
+    for (double time : timesForIterations) {
+        totalTime += time;
+    }
+    double averageTime = totalTime / numIterations;
+    std::cout << "十次计时的平均时间： " << averageTime << " 秒" << std::endl;
+
+    return 0;
+}
+
+#include "windmill.hpp"
+#include <iostream>
+#include <chrono>
+#include <opencv2/opencv.hpp>
+#include <ceres/ceres.h>
+
+// 定义残差函数，假设运动轨迹为 y = A * sin(B * x + C) + D，这里的 y 是相对纵坐标，x 是时间
+struct CostFunctor {
+    CostFunctor(double x, double y) : x_(x), y_(y) {}
+
+    template <typename T>
+    bool operator()(const T* const parameters, T* residual) const {
+        const T A = parameters[0];
+        const T B = parameters[1];
+        const T C = parameters[2];
+        const T D = parameters[3];
+        residual[0] = y_ - (A * ceres::sin(B * x_ + C) + D);
+        return true;
+    }
+
+private:
+    const double x_;
+    const double y_;
+};
+
+int main() {
+    double trueValue = 0.785;
+    double tolerance = trueValue * 0.05;
+
+    int numIterations = 10;
+    std::vector<double> timesForIterations;
+
+    for (int iter = 0; iter < numIterations; ++iter) {
+        std::chrono::milliseconds startTime = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch());
+        std::chrono::milliseconds t = startTime;
+        WINDMILL::WindMill wm(t.count());
+        cv::Mat src;
+        std::vector<std::pair<double, cv::Point>> midPointsData;
+        int p = 1;
+        double A_init = 2.0;
+        double B_init = 1.0;
+        double C_init = 2.0;
+        double D_init = 1.0;
+        double parameters[4] = {A_init, B_init, C_init, D_init};
+        
+
+        cv::Point originalCenter;
+        bool gotOriginalCenter = false;
+
+        while (p<800) {
+            p++;
+            t = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch());
+            src = wm.getMat((double)t.count() / 1000);
+
+            //==========================代码区========================//
+
+            cv::Mat filtered_src;
+            cv::GaussianBlur(src, filtered_src, cv::Size(5, 5), 1.5);
+            // 先对元图像进行高斯滤波处理，突出 R 和 Hammer 的特征
+            // 继续进行二值转化
+            cv::Mat binary_filtered_src;
+            cv::threshold(filtered_src, binary_filtered_src, 127, 255, cv::THRESH_BINARY);
+
+            // 对滤波后的图像进行灰度处理
+            cv::Mat gray_filtered_src;
+            cv::cvtColor(filtered_src, gray_filtered_src, cv::COLOR_BGR2GRAY);
+
+            if (binary_filtered_src.channels() > 1) {
+                cv::cvtColor(binary_filtered_src, binary_filtered_src, cv::COLOR_BGR2GRAY);
+            }
+
+            // 确保是 CV_8UC1 类型用于轮廓检测
+            cv::Mat imageForContours = binary_filtered_src.clone();
+            if (imageForContours.type()!= CV_8UC1) {
+                imageForContours.convertTo(imageForContours, CV_8UC1);
+            }
+
+            // 轮廓检测
+            std::vector<std::vector<cv::Point>> contours;
+            std::vector<cv::Vec4i> hierarchy;
+            cv::findContours(imageForContours, contours, hierarchy, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+
+            std::vector<cv::Point> centerPoints; // 储存找到的中心点
+
+            for (size_t i = 0; i < contours.size(); i++) {
+                double area = cv::contourArea(contours[i]);
+                if (area > 4000 && area < 5000) {
+                    cv::Rect boundingRect = cv::boundingRect(contours[i]);
+                    cv::rectangle(filtered_src, boundingRect, cv::Scalar(0, 255, 0), 2);
+
+                    cv::Moments moments = cv::moments(contours[i]);
+                    int cX = static_cast<int>(moments.m10 / moments.m00);
+                    int cY = static_cast<int>(moments.m01 / moments.m00);
+                    centerPoints.push_back(cv::Point(cX, cY));
+
+                    // 绘制蓝色中心点
+                    cv::circle(filtered_src, cv::Point(cX, cY), 3, cv::Scalar(255, 0, 0), -1);
+                }
+                if (area < 170) {
+                    cv::drawContours(filtered_src, contours, i, cv::Scalar(0, 255, 0), 1);
+                    cv::Moments moments = cv::moments(contours[i]);
+                    int cX = static_cast<int>(moments.m10 / moments.m00);
+                    int cY = static_cast<int>(moments.m01 / moments.m00);
+                    centerPoints.push_back(cv::Point(cX, cY));
+
+                    // 绘制蓝色中心点
+                    cv::circle(filtered_src, cv::Point(cX, cY), 3, cv::Scalar(255, 0, 0), -1);
+                }
+            }
+
+            if (!gotOriginalCenter && centerPoints.size() > 0) {
+                originalCenter = centerPoints[0];
+                gotOriginalCenter = true;
+            }
+
+            if (centerPoints.size() == 2) {
+                cv::Point midPoint((centerPoints[0].x + centerPoints[1].x) / 2, (centerPoints[0].y + centerPoints[1].y) / 2);
+                cv::circle(filtered_src, midPoint, 3, cv::Scalar(255, 255, 0), -1);
+
+                // 计算相对纵坐标并添加到用于拟合的数据集中
+                double relativeY = midPoint.y - originalCenter.y;
+                midPointsData.push_back(std::make_pair(t.count(), cv::Point(0, relativeY)));
+            }
+
+            // 使用 Ceres 进行拟合
+            ceres::Problem problem;
+            for (const auto& data : midPointsData) {
+                ceres::CostFunction* cost_function =
+                    new ceres::AutoDiffCostFunction<CostFunctor, 1, 4>(
+                        new CostFunctor(data.first, data.second.y));
+                problem.AddResidualBlock(cost_function, nullptr, parameters);
+            }
+
+            // 配置求解器选项
+            ceres::Solver::Options options;
+            options.minimizer_progress_to_stdout = false;
+            options.linear_solver_type = ceres::DENSE_NORMAL_CHOLESKY;
+            options.max_num_iterations = 100;
+
+
+            // 求解问题
+            ceres::Solver::Summary summary;
+            ceres::Solve(options, &problem, &summary);
+
+            double fittedValue = parameters[0] * std::sin(parameters[1] * t.count() + parameters[2]) + parameters[3];
+            double difference = std::abs(fittedValue - trueValue);
+            if (difference <= tolerance) {
+                std::cout<<"succeed!";
+            }
+        }
+
+        std::chrono::milliseconds endTime = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch());
+        double elapsedTime = (endTime.count() - startTime.count()) / 1000.0;
+        timesForIterations.push_back(elapsedTime);
+
+        std::cout << "Iteration " << iter << " - Fitted values: A = " << parameters[0] << ", B = " << parameters[1]
+                  << ", C = " << parameters[2] << ", D = " << parameters[3] << std::endl;
+    }
+
+    double totalTime = 0.0;
+    for (double time : timesForIterations) {
+        totalTime += time;
+    }
+    double averageTime = totalTime / numIterations;
+    std::cout << "十次计时的平均时间： " << averageTime << " 秒" << std::endl;
+
+    return 0;
+}
+
+
+#include "windmill.hpp"
+#include <iostream>
+#include <chrono>
+#include <opencv2/opencv.hpp>
+#include <ceres/ceres.h>
+
+// 定义残差函数，形式为 A*cos(w*t + phi) + b
+struct ResidualFunctor {
+    ResidualFunctor(double t, double y) : t_(t), y_(y) {}
+    
+    template <typename T>
+    bool operator()(const T* const parameters, T* residual) const {
+        const T A = parameters[0];
+        const T w = parameters[1];
+        const T phi = parameters[2];
+        const T b = parameters[3];
+        residual[0] = y_ - (A * ceres::cos(w * t_ + phi) + b);
+        return true;
+    }
+
+private:
+    const double t_;
+    const double y_;
+};
+
+int main() {
+    double trueSpeed = 0.785;
+    double tolerance = trueSpeed * 0.05;
+
+    int numIterations = 10;
+    std::vector<double> timesForIterations;
+
+    for (int iter = 0; iter < numIterations; ++iter) {
+        std::chrono::milliseconds startTime = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch());
+        std::chrono::milliseconds t = startTime;
+        WINDMILL::WindMill wm(t.count());
+        cv::Mat src;
+
+        double A_init = 2.0;
+        double w_init = 1.0;
+        double phi_init = 2.0;
+        double b_init = 1.0;
+
+        double parameters[4] = {A_init, w_init, phi_init, b_init};
+        int p=0;
+
+        std::vector<std::pair<double, cv::Point>> dataPoints;
+
+        while (p<5000) {
+            p++;
+            t = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch());
+            src = wm.getMat((double)t.count() / 1000);
+
+            // 图像处理部分与之前相同
+            cv::Mat filtered_src;
+            cv::GaussianBlur(src, filtered_src, cv::Size(5, 5), 1.5);
+            cv::Mat binary_filtered_src;
+            cv::threshold(filtered_src, binary_filtered_src, 127, 255, cv::THRESH_BINARY);
+            cv::Mat gray_filtered_src;
+            cv::cvtColor(filtered_src, gray_filtered_src, cv::COLOR_BGR2GRAY);
+            if (binary_filtered_src.channels() > 1) {
+                cv::cvtColor(binary_filtered_src, binary_filtered_src, cv::COLOR_BGR2GRAY);
+            }
+            cv::Mat imageForContours = binary_filtered_src.clone();
+            if (imageForContours.type()!= CV_8UC1) {
+                imageForContours.convertTo(imageForContours, CV_8UC1);
+            }
+            std::vector<std::vector<cv::Point>> contours;
+            std::vector<cv::Vec4i> hierarchy;
+            cv::findContours(imageForContours, contours, hierarchy, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+
+            cv::Point fispoint;
+            cv::Point secpoint;
+            bool foundFirstPoint = false;
+            bool foundSecondPoint = false;
+
+            for (size_t i = 0; i < contours.size(); i++) {
+                double area = cv::contourArea(contours[i]);
+                if (area > 4000 && area < 5000) {
+                    cv::Rect boundingRect = cv::boundingRect(contours[i]);
+                    cv::rectangle(filtered_src, boundingRect, cv::Scalar(0, 255, 0), 2);
+
+                    cv::Moments moments = cv::moments(contours[i]);
+                    int cX = static_cast<int>(moments.m10 / moments.m00);
+                    int cY = static_cast<int>(moments.m01 / moments.m00);
+                    if (!foundFirstPoint) {
+                        fispoint = cv::Point(cX, cY);
+                        foundFirstPoint = true;
+                    } else if (!foundSecondPoint) {
+                        secpoint = cv::Point(cX, cY);
+                        foundSecondPoint = true;
+                    }
+
+                    // 绘制蓝色中心点
+                    cv::circle(filtered_src, cv::Point(cX, cY), 3, cv::Scalar(255, 0, 0), -1);
+                }
+                if (area < 170) {
+                    cv::drawContours(filtered_src, contours, i, cv::Scalar(0, 255, 0), 1);
+                    cv::Moments moments = cv::moments(contours[i]);
+                    int cX = static_cast<int>(moments.m10 / moments.m00);
+                    int cY = static_cast<int>(moments.m01 / moments.m00);
+                    if (!foundFirstPoint) {
+                        fispoint = cv::Point(cX, cY);
+                        foundFirstPoint = true;
+                    } else if (!foundSecondPoint) {
+                        secpoint = cv::Point(cX, cY);
+                        foundSecondPoint = true;
+                    }
+
+                    // 绘制蓝色中心点
+                    cv::circle(filtered_src, cv::Point(cX, cY), 3, cv::Scalar(255, 0, 0), -1);
+                }
+            }
+
+            // 计算相对位移并添加到数据点集合
+            if (foundFirstPoint && foundSecondPoint) {
+                double time = t.count() / 1000.0;
+                cv::Point displacement = fispoint - secpoint;
+                dataPoints.push_back(std::make_pair(time, displacement));
+            }
+
+            // 使用 Ceres 进行拟合
+            ceres::Problem problem;
+            for (const auto& data : dataPoints) {
+                ceres::CostFunction* cost_function =
+                    new ceres::AutoDiffCostFunction<ResidualFunctor, 2, 4>(
+                        new ResidualFunctor(data.first, data.second.x));
+                problem.AddResidualBlock(cost_function, nullptr, parameters);
+            }
+
+            // 配置求解器选项
+            ceres::Solver::Options options;
+            options.minimizer_progress_to_stdout = false;
+            options.linear_solver_type = ceres::DENSE_QR;
+            options.max_num_iterations = 100;
+
+            // 求解问题
+            ceres::Solver::Summary summary;
+            ceres::Solve(options, &problem, &summary);
+
+            // 计算拟合速度
+            double fittedSpeedX = parameters[0] * ceres::cos(parameters[1] * t.count() / 1000 + parameters[2]) + parameters[3];
+            double difference = std::abs(fittedSpeedX - trueSpeed);
+            if (difference <= tolerance) {
+                std::cout<<"succeed  ";
+            }
+        }
+
+        std::chrono::milliseconds endTime = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch());
+        double elapsedTime = (endTime.count() - startTime.count()) / 1000.0;
+        timesForIterations.push_back(elapsedTime);
+
+        std::cout << "Iteration " << iter << " - Fitted values: A = " << parameters[0] << ", w = " << parameters[1]
+                  << ", phi = " << parameters[2] << ", b = " << parameters[3] << std::endl;
+    }
+
+    double totalTime = 0.0;
+    for (double time : timesForIterations) {
+        totalTime += time;
+    }
+    double averageTime = totalTime / numIterations;
+    std::cout << "十次计时的平均时间： " << averageTime << " 秒" << std::endl;
+
+    return 0;
+}
+#include "windmill.hpp"
+#include <stdlib.h>
+#include <time.h>
+
+namespace WINDMILL
+{
+    WindMill::WindMill(double time)
+    {
+        cnt = 0;
+        direct = false;
+        start_time = time;
+        A = 0.785;
+        w = 1.884;
+        fai = 1.65;
+        A0 = 1.305;
+        now_angle = 0.0;
+        std::srand((unsigned)std::time(NULL));
+        int x = rand() % 200 + 400;
+        int y = rand() % 100 + 420;
+        R_center = cv::Point2i(x, y);
+    }
+
+    void WindMill::drawR(cv::Mat &img, const cv::Point2i &center)
+    {
+        cv::putText(img, "R", cv::Point2i(center.x - 5, center.y + 5), cv::FONT_HERSHEY_COMPLEX, 0.7, cv::Scalar(0, 0, 255), 2);
+    }
+
+    void WindMill::drawHitFan(cv::Mat &img, const cv::Point2i &center, double angle)
+    {
+        cv::Point2i mid1 = calPoint(center, angle, 40);
+        cv::Point2i mid2 = calPoint(center, angle, 150);
+        cv::Point2i mid3 = calPoint(center, angle, 190);
+        cv::line(img, mid1, mid2, cv::Scalar(0, 0, 255), 8);
+        cv::line(img, calPoint(mid2, angle + 90, 30), calPoint(mid2, angle - 90, 30), cv::Scalar(0, 0, 255), 8);
+        cv::line(img, calPoint(mid3, angle + 90, 30), calPoint(mid3, angle - 90, 30), cv::Scalar(0, 0, 255), 8);
+        cv::line(img, calPoint(mid2, angle + 90, 30), calPoint(mid3, angle + 90, 30), cv::Scalar(0, 0, 255), 8);
+        cv::line(img, calPoint(mid2, angle - 90, 30), calPoint(mid3, angle - 90, 30), cv::Scalar(0, 0, 255), 8);
+    }
+
+    void WindMill::drawOtherFan(cv::Mat &img, const cv::Point2i &center, double angle)
+    {
+        cv::Point2i mid1 = calPoint(center, angle, 40);
+        cv::Point2i mid2 = calPoint(center, angle, 150);
+        cv::Point2i mid3 = calPoint(center, angle, 190);
+        cv::Point2i mid4 = calPoint(center, angle, 200);
+        cv::line(img, mid1, mid2, cv::Scalar(0, 0, 255), 8);
+        cv::line(img, calPoint(mid1, angle + 90, 10), calPoint(mid1, angle - 90, 10), cv::Scalar(0, 0, 255), 3);
+        cv::line(img, calPoint(mid2, angle + 90, 40), calPoint(mid1, angle + 90, 10), cv::Scalar(0, 0, 255), 3);
+        cv::line(img, calPoint(mid2, angle + 90, 40), calPoint(mid4, angle + 90, 40), cv::Scalar(0, 0, 255), 3);
+        cv::line(img, calPoint(mid4, angle + 90, 40), calPoint(mid4, angle - 90, 40), cv::Scalar(0, 0, 255), 3);
+        cv::line(img, calPoint(mid4, angle - 90, 40), calPoint(mid2, angle - 90, 40), cv::Scalar(0, 0, 255), 3);
+        cv::line(img, calPoint(mid2, angle - 90, 40), calPoint(mid1, angle - 90, 10), cv::Scalar(0, 0, 255), 3);
+        cv::line(img, calPoint(mid2, angle + 90, 30), calPoint(mid2, angle - 90, 30), cv::Scalar(0, 0, 255), 3);
+        cv::line(img, calPoint(mid3, angle + 90, 30), calPoint(mid3, angle - 90, 30), cv::Scalar(0, 0, 255), 3);
+        cv::line(img, calPoint(mid2, angle + 90, 30), calPoint(mid3, angle + 90, 30), cv::Scalar(0, 0, 255), 3);
+        cv::line(img, calPoint(mid2, angle - 90, 30), calPoint(mid3, angle - 90, 30), cv::Scalar(0, 0, 255), 3);
+    }
+
+    cv::Mat WindMill::getMat(double now_time)
+    {
+        cv::Mat windmill = cv::Mat(720, 1080, CV_8UC3, cv::Scalar(0, 0, 0));
+        cnt++;
+        if (R_center.y > 460)
+            direct = false;
+        if (R_center.y < 260)
+            direct = true;
+        if (direct && cnt % 50 < 5)
+        {
+            R_center.y += 1;
+            R_center.x += 1;
+        }
+        if (!direct && cnt % 50 < 5)
+        {
+            R_center.y -= 1;
+            R_center.x -= 1;
+        }
+        unsigned seed = std::chrono::system_clock::now().time_since_epoch().count();
+        std::default_random_engine gen(seed);
+        std::normal_distribution<double> noise(0, 0.2);
+        now_angle = SumAngle(0.0, start_time, now_time - start_time) + noise(gen);
+        drawR(windmill, R_center);
+        drawHitFan(windmill, R_center, now_angle);
+        for (int i = 1; i < 5; i++)
+        {
+            drawOtherFan(windmill, R_center, now_angle + 72 * i);
+        }
+
+        return windmill;
+    }
+}#include "windmill.hpp"
+#include <iostream>
+#include <chrono>
+#include <opencv2/opencv.hpp>
+#include <ceres/ceres.h>
+
+// 定义残差函数，形式为 A*sin(w*t + phi) + b
+struct ResidualFunctor {
+    ResidualFunctor(double t, double y) : t_(t), y_(y) {}
+
+    template <typename T>
+    bool operator()(const T* const parameters, T* residual) const {
+        const T A = parameters[0];
+        const T w = parameters[1];
+        const T phi = parameters[2];
+        const T b = parameters[3];
+        residual[0] = y_ - (A * ceres::sin(w * t_ + phi) + b);
+        return true;
+    }
+
+private:
+    const double t_;
+    const double y_;
+};
+
+int main() {
+    double trueValue = 0.785;
+    double tolerance = trueValue * 0.05;
+
+    int numIterations = 10;
+    std::vector<double> timesForIterations;
+
+    for (int iter = 0; iter < numIterations; ++iter) {
+        std::chrono::milliseconds startTime = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch());
+        std::chrono::milliseconds t = startTime;
+        WINDMILL::WindMill wm(t.count());
+        cv::Mat src;
+
+        double A_init = 2.0;
+        double w_init = 1.0;
+        double phi_init = 2.0;
+        double b_init = 1.0;
+
+        double parameters[4] = {A_init, w_init, phi_init, b_init};
+        int p = 0;
+
+        std::vector<std::pair<double, cv::Point>> dataPoints;
+
+        while (p<600) {
+            p++;
+            t = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch());
+            src = wm.getMat((double)t.count() / 1000);
+
+            // 图像处理部分与之前相同
+            cv::Mat filtered_src;
+            cv::GaussianBlur(src, filtered_src, cv::Size(5, 5), 1.5);
+            cv::Mat binary_filtered_src;
+            cv::threshold(filtered_src, binary_filtered_src, 127, 255, cv::THRESH_BINARY);
+            cv::Mat gray_filtered_src;
+            cv::cvtColor(filtered_src, gray_filtered_src, cv::COLOR_BGR2GRAY);
+            if (binary_filtered_src.channels() > 1) {
+                cv::cvtColor(binary_filtered_src, binary_filtered_src, cv::COLOR_BGR2GRAY);
+            }
+            cv::Mat imageForContours = binary_filtered_src.clone();
+            if (imageForContours.type()!= CV_8UC1) {
+                imageForContours.convertTo(imageForContours, CV_8UC1);
+            }
+            std::vector<std::vector<cv::Point>> contours;
+            std::vector<cv::Vec4i> hierarchy;
+            cv::findContours(imageForContours, contours, hierarchy, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+
+            cv::Point fispoint;
+            cv::Point secpoint;
+            bool foundFirstPoint = false;
+            bool foundSecondPoint = false;
+
+            for (size_t i = 0; i < contours.size(); i++) {
+                double area = cv::contourArea(contours[i]);
+                if (area > 4000 && area < 5000) {
+                    cv::Rect boundingRect = cv::boundingRect(contours[i]);
+                    cv::rectangle(filtered_src, boundingRect, cv::Scalar(0, 255, 0), 2);
+
+                    cv::Moments moments = cv::moments(contours[i]);
+                    int cX = static_cast<int>(moments.m10 / moments.m00);
+                    int cY = static_cast<int>(moments.m01 / moments.m00);
+                    if (!foundFirstPoint) {
+                        fispoint = cv::Point(cX, cY);
+                        foundFirstPoint = true;
+                    } else if (!foundSecondPoint) {
+                        secpoint = cv::Point(cX, cY);
+                        foundSecondPoint = true;
+                    }
+
+                    // 绘制蓝色中心点
+                    cv::circle(filtered_src, cv::Point(cX, cY), 3, cv::Scalar(255, 0, 0), -1);
+                }
+                if (area < 170) {
+                    cv::drawContours(filtered_src, contours, i, cv::Scalar(0, 255, 0), 1);
+                    cv::Moments moments = cv::moments(contours[i]);
+                    int cX = static_cast<int>(moments.m10 / moments.m00);
+                    int cY = static_cast<int>(moments.m01 / moments.m00);
+                    if (!foundFirstPoint) {
+                        fispoint = cv::Point(cX, cY);
+                        foundFirstPoint = true;
+                    } else if (!foundSecondPoint) {
+                        secpoint = cv::Point(cX, cY);
+                        foundSecondPoint = true;
+                    }
+
+                    // 绘制蓝色中心点
+                    cv::circle(filtered_src, cv::Point(cX, cY), 3, cv::Scalar(255, 0, 0), -1);
+                }
+            }
+
+            // 计算相对位移并添加到数据点集合
+            if (foundFirstPoint && foundSecondPoint) {
+                double time = t.count() / 1000.0;
+                cv::Point displacement = fispoint - secpoint;
+                dataPoints.push_back(std::make_pair(time, cv::Point(0, displacement.y)));
+
+            }
+
+            // 使用 Ceres 进行拟合
+           // 使用 Ceres 进行拟合
+            ceres::Problem problem;
+            for (const auto& data : dataPoints) {
+          ceres::CostFunction* cost_function =
+                 new ceres::AutoDiffCostFunction<ResidualFunctor, 1, 4>(
+                         new ResidualFunctor(data.first, static_cast<double>(data.second.y)));
+                problem.AddResidualBlock(cost_function, nullptr, parameters);
+            }
+
+
+            // 配置求解器选项
+            ceres::Solver::Options options;
+            options.minimizer_progress_to_stdout = false;
+            options.linear_solver_type = ceres::DENSE_QR;
+            options.max_num_iterations = 100;
+
+            // 求解问题
+            ceres::Solver::Summary summary;
+            ceres::Solve(options, &problem, &summary);
+
+            double fittedValue = parameters[0] * ceres::sin(parameters[1] * t.count() / 1000 + parameters[2]) + parameters[3];
+            double difference = std::abs(fittedValue - trueValue);
+            if (difference <= tolerance) {
+                break;
+            }
+        }
+
+        // 对拟合的轨迹方程求导得到速度方程
+        double A = parameters[0];
+        double w = parameters[1];
+        double v = A * w * ceres::cos(w * t.count() / 1000 + parameters[2])/1000;
+
+        std::chrono::milliseconds endTime = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch());
+        double elapsedTime = (endTime.count() - startTime.count()) / 1000.0;
+        timesForIterations.push_back(elapsedTime);
+
+        std::cout << "Iteration " << iter << " - Fitted values: A = " << parameters[0] << ", w = " << parameters[1]
+                  << ", phi = " << parameters[2] << ", b = " << parameters[3] << std::endl;
+        std::cout << "Iteration " << iter << " - Velocity: " << v << std::endl;
+    }
+
+    double totalTime = 0.0;
+    for (double time : timesForIterations) {
+        totalTime += time;
+    }
+    double averageTime = totalTime / numIterations;
+    std::cout << "十次计时的平均时间： " << averageTime << " 秒" << std::endl;
+
+    return 0;
+}
+#include "windmill.hpp"
+#include <iostream>
+#include <chrono>
+#include <opencv2/opencv.hpp>
+#include <ceres/ceres.h>
+
+// 定义残差函数，假设转速方程为 w * t + phi
+struct RotationResidualFunctor {
+    RotationResidualFunctor(double t, double angle) : t_(t), angle_(angle) {}
+
+    template <typename T>
+    bool operator()(const T* const parameters, T* residual) const {
+        const T w = parameters[0];
+        const T phi = parameters[1];
+        residual[0] = angle_ - (w * t_ + phi);
+        return true;
+    }
+
+private:
+    const double t_;
+    const double angle_;
+};
+
+int main() {
+    // 创建 WindMill 对象
+    double start_time = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count() / 1000.0;
+    WINDMILL::WindMill wm(start_time);
+
+    // 数据收集
+    std::vector<std::pair<double, double>> dataPoints;
+    double trueValue = 0.785; // 假设的真值，可根据实际情况调整
+    double tolerance = trueValue * 0.05;
+
+    int numIterations = 100;
+    for (int iter = 0; iter < numIterations; ++iter) {
+        auto t = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch());
+        double now_time = t.count() / 1000.0;
+        cv::Mat img = wm.getMat(now_time);
+
+        // 提取角度信息（这里假设可以从 WindMill 对象中获取当前角度）
+        double angle = wm.getNowAngle();
+
+
+        dataPoints.push_back(std::make_pair(now_time - start_time, angle));
+    }
+
+    // Ceres 拟合
+    double w_init = 1.0;
+    double phi_init = 0.0;
+    double parameters[2] = {w_init, phi_init};
+
+    ceres::Problem problem;
+    for (const auto& data : dataPoints) {
+        ceres::CostFunction* cost_function =
+            new ceres::AutoDiffCostFunction<RotationResidualFunctor, 1, 2>(
+                new RotationResidualFunctor(data.first, data.second));
+        problem.AddResidualBlock(cost_function, nullptr, parameters);
+    }
+
+    ceres::Solver::Options options;
+    options.minimizer_progress_to_stdout = false;
+    options.linear_solver_type = ceres::DENSE_QR;
+    options.max_num_iterations = 100;
+
+    ceres::Solver::Summary summary;
+    ceres::Solve(options, &problem, &summary);
+
+    // 求解转速
+    double w = parameters[0];
+    std::cout << "Angular velocity (w): " << w << " degrees/second" << std::endl;
+
+    return 0;
+}
