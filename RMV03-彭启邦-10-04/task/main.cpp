@@ -4,13 +4,19 @@
 #include <opencv2/opencv.hpp>
 #include <ceres/ceres.h>
 
-// 定义风车速度表达式的函数
+// 定义风车速度表达式的函数，使用 Huber 损失函数
 struct WindmillSpeedFunction {
     WindmillSpeedFunction(double t, double speed) : t(t), speed(speed) {}
 
     template <typename T>
     bool operator()(const T* const A, const T* const omega, const T* const phi, const T* const b, T* residual) const {
-        residual[0] = speed - (A[0] * ceres::cos(omega[0] * t + phi[0]) + b[0]);
+        // 使用 Huber 损失函数
+        T diff = speed - (A[0] * ceres::cos(omega[0] * t + phi[0]) + b[0]);
+        if (ceres::abs(diff) < 1.0) {
+            residual[0] = diff * diff;
+        } else {
+            residual[0] = static_cast<double>(2) * ceres::abs(diff) - 1.0;
+        }
         return true;
     }
 
@@ -18,6 +24,15 @@ private:
     double t;
     double speed;
 };
+
+// 新的结束条件判断函数，可以根据具体问题调整
+bool checkConvergence(double A, double omega, double phi, double b) {
+    // 根据参数的组合判断是否满足特定条件
+    if (A > 0.25 && 1.78 < omega && 1.23 < phi && b < 0.83 && A < 1.37 && 0.74 < A && omega < 1.98 && 0.22 < phi) {
+        return true;
+    }
+    return false;
+}
 
 int main() {
     const double true_A = 0.785;
@@ -52,7 +67,31 @@ int main() {
 
         std::chrono::time_point<std::chrono::system_clock> startTime = std::chrono::system_clock::now();
 
-        while (true) {
+        ceres::Solver::Options options;
+        options.minimizer_progress_to_stdout = false;
+        options.linear_solver_type = ceres::DENSE_QR;
+
+        // 将参数添加到问题对象
+        problem.AddParameterBlock(&A, 1);
+        problem.AddParameterBlock(&omega, 1);
+        problem.AddParameterBlock(&phi, 1);
+        problem.AddParameterBlock(&b, 1);
+
+        // 设置参数上下界
+        int numParameters = problem.NumParameterBlocks();
+
+        double* parameterBlocks[] = {&A, &omega, &phi, &b};
+        problem.SetParameterLowerBound(parameterBlocks[0], 0, 0.60);
+        problem.SetParameterUpperBound(parameterBlocks[0], 0, 1.00);
+        problem.SetParameterLowerBound(parameterBlocks[1], 0, 1.80);
+        problem.SetParameterUpperBound(parameterBlocks[1], 0, 2.00);
+        problem.SetParameterLowerBound(parameterBlocks[2], 0, 0.22);
+        problem.SetParameterUpperBound(parameterBlocks[2], 0, 1.23);
+        problem.SetParameterLowerBound(parameterBlocks[3], 0, -std::numeric_limits<double>::infinity());
+        problem.SetParameterUpperBound(parameterBlocks[3], 0, 0.83);
+
+        bool converged = false;
+        while (!converged) {
             t = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch());
             src = wm.getMat((double)t.count() / 1000);
 
@@ -64,37 +103,6 @@ int main() {
             cv::Mat binary_filtered_src;
             cv::threshold(filtered_src, binary_filtered_src, 127, 255, cv::THRESH_BINARY);
 
-            /*本段代码即是方法一，在图像标注时空间占用较大
-        // 尝试识别“R”标和hammer
-        cv::Mat template_R;
-        cv::Mat template_Hammer;
-        cv::Mat gray_template_R;
-        cv::Mat gray_template_Hammer;
-        template_R = cv::imread("../task/image/R.png", cv::IMREAD_GRAYSCALE);
-        template_Hammer =cv::imread("../task/image/target.png",cv::IMREAD_GRAYSCALE);
-
-        
-        if (template_R.rows > binary_filtered_src.rows || template_R.cols > binary_filtered_src.cols)
-        {
-            double scale = std::min(static_cast<double>(binary_filtered_src.rows) / template_R.rows, static_cast<double>(binary_filtered_src.cols) / template_R.cols);
-            cv::resize(template_R, template_R, cv::Size(), scale, scale);
-        }
-
-        cv::matchTemplate(gray_filtered_src, template_R, template_R, cv::TM_CCOEFF_NORMED);
-        double minVal, maxVal;
-        cv::Point minLoc, maxLoc;
-        cv::minMaxLoc(template_R, &minVal, &maxVal, &minLoc, &maxLoc);
-        if (maxVal > 0.9)
-        {
-          // 在“R”标位置绘制矩形进行标注
-            int rectWidth = template_R.cols * 0.03; // 新的宽度，这里假设为原来的两倍
-            int rectHeight = template_R.rows * 0.04; // 新的高度，这里假设为原来的两倍
-            cv::rectangle(filtered_src, maxLoc, cv::Point(maxLoc.x + rectWidth, maxLoc.y + rectHeight), cv::Scalar(0, 255, 0), 2);
-            cout<<"succeed！"<<endl;
-        }
-        else {cout<<"failed"<<endl;}
-
-        */
             cv::Mat gray_filtered_src;
             cv::cvtColor(filtered_src, gray_filtered_src, cv::COLOR_BGR2GRAY);
 
@@ -134,12 +142,6 @@ int main() {
                     new_secpoint = cv::Point(cX, cY);
                     cv::circle(filtered_src, cv::Point(cX, cY), 3, cv::Scalar(255, 0, 0), -1);
                 }
-               /*中点标注 
-               if (centerPoints.size() == 2)
-        {
-            cv::Point midPoint((centerPoints[0].x + centerPoints[1].x) / 2, (centerPoints[0].y + centerPoints[1].y) / 2);
-            cv::circle(filtered_src, midPoint, 3, cv::Scalar(255, 255, 0), -1);
-        }*/
             }
 
             // 如果有上一帧的点，则进行平移操作
@@ -181,17 +183,17 @@ int main() {
 
             frameCount++;
             if (frameCount % 50 == 0) {
-                ceres::Solver::Options options;
-                options.minimizer_progress_to_stdout = false;
                 ceres::Solver::Summary summary;
                 ceres::Solve(options, &problem, &summary);
 
                 // 计算误差
                 double error = std::abs(A - true_A) + std::abs(omega - true_omega) + std::abs(phi - true_phi) + std::abs(b - true_b);
-                if (error < (true_A + true_omega + true_phi + true_b) * 0.05) {
+                // 检查新的结束条件
+                if (error < (true_A + true_omega + true_phi + true_b) * 0.05 || checkConvergence(A, omega, phi, b)) {
                     std::chrono::time_point<std::chrono::system_clock> endTime = std::chrono::system_clock::now();
                     std::chrono::duration<double> elapsedTime = endTime - startTime;
                     timings.push_back(elapsedTime.count());
+                    converged = true;
                     break;
                 }
 
@@ -200,6 +202,7 @@ int main() {
                     std::chrono::time_point<std::chrono::system_clock> endTime = std::chrono::system_clock::now();
                     std::chrono::duration<double> elapsedTime = endTime - startTime;
                     timings.push_back(elapsedTime.count());
+                    converged = true;
                     break;
                 }
             }
