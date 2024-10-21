@@ -1,0 +1,1661 @@
+#include "ImageProcessingLib.h"
+#include <opencv2/opencv.hpp>
+#include <iostream>
+
+using namespace cv;
+using namespace std;
+
+int main() {
+    VideoCapture cap("../resourses/11.mp4");
+    if (!cap.isOpened()) {
+        cerr << "无法打开视频文件。" << endl;
+        return -1;
+    }
+
+    VideoWriter writer("output_video.mp4", VideoWriter::fourcc('M', 'P', '4', 'V'), cap.get(CAP_PROP_FPS), Size(cap.get(CAP_PROP_FRAME_WIDTH), cap.get(CAP_PROP_FRAME_HEIGHT)));
+
+    Mat frame;
+    while (true) {
+        bool success = cap.read(frame);
+        if (!success) {
+            break;
+        }
+
+        // 图像处理
+        Mat processedFrame = decreaseExposure(frame, 0.3);
+        Mat colorSeparatedFrame = separateColors(processedFrame, Scalar(0, 0, 255));
+        Mat binaryFrame = binarizeImage(colorSeparatedFrame, 50);
+
+        // 轮廓检测
+        vector<RotatedRect> detectedContours = detectAndFilterContours(
+            binaryFrame,
+            Scalar(0, 0, 255),
+            700,
+            45.0,
+            10.0,
+            0.6,
+            0.9
+        );
+
+        // 绘制轮廓
+        for (const auto& rect : detectedContours) {
+            Point2f vertices[4];
+            rect.points(vertices);
+            for (int j = 0; j < 4; j++) {
+                line(frame, vertices[j], vertices[(j + 1) % 4], Scalar(0, 255, 0), 2);
+            }
+        }
+
+        writer.write(frame);
+        imshow("Frame", frame);
+        if (waitKey(30) >= 0) {
+            break;
+        }
+    }
+
+    cap.release();
+    writer.release();
+    destroyAllWindows();
+
+    return 0;
+}
+#include <iostream>
+#include <opencv2/opencv.hpp>
+
+using namespace std;
+using namespace cv;
+
+// 假设这里定义了 RED 和 other necessary constants
+enum EnemyColor { RED };
+
+// 颜色分离函数，返回提取目标颜色后的灰度图
+Mat separateColors(const Mat& _roiImg, EnemyColor _enemy_color) {
+    vector<Mat> channels;
+    // 把一个 3 通道图像转换成 3 个单通道图像
+    split(_roiImg, channels);
+
+    Mat grayImg;
+
+    // 剔除我们不想要的颜色
+    if (_enemy_color == RED) {
+        grayImg = channels.at(0) - channels.at(2); // B—R
+    }
+    else {
+        grayImg = channels.at(2) - channels.at(0); // R - B
+    }
+    return grayImg;
+}
+
+Mat decreaseExposure(Mat image, double factor) {
+    Mat result = image.clone();
+    for (int i = 0; i < result.rows; i++) {
+        for (int j = 0; j < result.cols; j++) {
+            Vec3b& pixel = result.at<Vec3b>(i, j);
+            for (int k = 0; k < 3; k++) {
+                pixel[k] = static_cast<uchar>(pixel[k] * factor);
+            }
+        }
+    }
+    return result;
+}
+
+// 图像二值化函数
+Mat binarizeImage(Mat image, int threshold) {
+    Mat binaryImage;
+    cv::threshold(image, binaryImage, threshold, 255, THRESH_BINARY);
+    return binaryImage;
+}
+
+class ArmorParam {
+public:
+    int light_min_area = 700;
+    double light_max_angle = 45.0;
+    double light_min_size = 10.0;
+    double light_contour_min_solidity = 0.5;
+    double light_max_ratio = 0.4;
+};
+
+class LightDescriptor {
+public:
+    LightDescriptor() {};
+    LightDescriptor(const RotatedRect& light) {
+        width = light.size.width;
+        length = light.size.height;
+        center = light.center;
+        angle = light.angle;
+        area = light.size.area();
+    }
+    const LightDescriptor& operator=(const LightDescriptor& ld) {
+        this->width = ld.width;
+        this->length = ld.length;
+        this->center = ld.center;
+        this->angle = ld.angle;
+        this->area = ld.area;
+        return *this;
+    }
+
+    // 返回旋转矩阵
+    RotatedRect rec() const {
+        return RotatedRect(center, Size2f(width, length), angle);
+    }
+
+public:
+    float width;
+    float length;
+    Point2f center;
+    float angle;
+    float area;
+};
+
+int main() {
+    VideoCapture cap("../resourses/11.mp4");
+    if (!cap.isOpened()) {
+        cerr << "无法打开视频文件。" << endl;
+        return -1;
+    }
+
+    VideoWriter writer("output_video.mp4", VideoWriter::fourcc('M', 'P', '4', 'V'), cap.get(CAP_PROP_FPS), Size(cap.get(CAP_PROP_FRAME_WIDTH), cap.get(CAP_PROP_FRAME_HEIGHT)));
+
+    Mat frame;
+    double exposureFactor = 0.3; // 曝光降低因子，可根据需要调整
+    int binaryThreshold = 50; // 二值化阈值，可以根据实际情况调整
+    int brightness_threshold = 100; // 设置阈值，根据相机拍摄实际情况调整
+
+    while (true) {
+        bool success = cap.read(frame);
+        if (!success) {
+            break;
+        }
+
+        // 降低曝光
+        Mat decreasedExposureFrame = decreaseExposure(frame, exposureFactor);
+
+        // 进行颜色分离（假设这里只处理红色）
+        Mat separatedColorsFrame = separateColors(decreasedExposureFrame, RED);
+
+        // 二值化
+        Mat binaryFrame = binarizeImage(separatedColorsFrame, binaryThreshold);
+
+        // 再次阈值化和膨胀处理
+        Mat binBrightImg;
+        cv::threshold(binaryFrame, binBrightImg, brightness_threshold, 255, cv::THRESH_BINARY);
+        Mat element = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(3, 3));
+        cv::dilate(binBrightImg, binBrightImg, element);
+
+        // 找轮廓
+        vector<vector<Point> > lightContours;
+        findContours(binBrightImg.clone(), lightContours, RETR_EXTERNAL, CHAIN_APPROX_SIMPLE);
+
+        // 创建用于绘制轮廓的图像副本
+        Mat debugImg = frame.clone();
+
+        // 过滤和处理轮廓
+        ArmorParam armorParam;
+        vector<LightDescriptor> validLightDescriptors;
+        for (size_t i = 0; i < lightContours.size(); i++) {
+            RotatedRect rect = minAreaRect(lightContours[i]);
+            double area = contourArea(lightContours[i]);
+            double ratio = rect.size.width / rect.size.height;
+            double solidity = area / (rect.size.area());
+
+            if (area >= armorParam.light_min_area &&
+                abs(rect.angle) <= armorParam.light_max_angle &&
+                rect.size.width >= armorParam.light_min_size &&
+                rect.size.height >= armorParam.light_min_size &&
+                solidity >= armorParam.light_contour_min_solidity &&
+                ratio <= armorParam.light_max_ratio) {
+                LightDescriptor lightDescriptor(rect);
+                validLightDescriptors.push_back(lightDescriptor);
+
+                // 绘制外接矩形
+                Point2f vertices[4];
+                rect.points(vertices);
+                for (int j = 0; j < 4; j++) {
+                    line(debugImg, vertices[j], vertices[(j + 1) % 4], Scalar(0, 255, 0), 2);
+                }
+            }
+        }
+
+        // 显示绘制了轮廓和外接矩形的图像
+        imshow("contours", debugImg);
+
+        writer.write(binBrightImg);
+
+       
+        if (waitKey(30) >= 0) {
+            break;
+        }
+    }
+
+    cap.release();
+    writer.release();
+    destroyAllWindows();
+
+    return 0;
+}
+#include <opencv2/opencv.hpp>
+#include <vector>
+
+using namespace std;
+using namespace cv;
+
+// 装甲板参数类
+class ArmorParam {
+public:
+    int light_min_area = 700; // 最小面积
+    double light_max_angle = 45.0; // 最大角度
+    double light_min_size = 10.0; // 最小尺寸
+    double light_contour_min_solidity = 0.5; // 最小凸度
+    double light_max_ratio = 0.4; // 最大长宽比
+};
+
+// 装甲板描述类
+class LightDescriptor {
+public:
+    LightDescriptor() {};
+    LightDescriptor(const RotatedRect& light) {
+        width = light.size.width;
+        length = light.size.height;
+        center = light.center;
+        angle = light.angle;
+        area = light.size.area();
+    }
+    RotatedRect rec() const {
+        return RotatedRect(center, Size2f(width, length), angle);
+    }
+    float width;
+    float length;
+    Point2f center;
+    float angle;
+    float area;
+};
+
+// 装甲板识别模块
+vector<LightDescriptor> detectArmorPlates(const Mat& frame, const ArmorParam& params) {
+    vector<LightDescriptor> lightDescriptors;
+    vector<vector<Point>> contours;
+    Mat thresh;
+    
+    // 图像预处理
+    Mat gray, blurred, threshed;
+    cvtColor(frame, gray, COLOR_BGR2GRAY);
+    GaussianBlur(gray, blurred, Size(9, 9), 2, 2);
+    threshold(blurred, threshed, 0, 255, THRESH_BINARY_INV + THRESH_OTSU);
+
+    // 轮廓检测
+    findContours(threshed, contours, RETR_EXTERNAL, CHAIN_APPROX_SIMPLE);
+    
+    // 轮廓筛选和特征提取
+    for (size_t i = 0; i < contours.size(); i++) {
+        RotatedRect rect = minAreaRect(contours[i]);
+        double area = contourArea(contours[i]);
+        double ratio = rect.size.width / rect.size.height;
+        double solidity = area / (rect.size.area());
+
+        if (area >= params.light_min_area &&
+            abs(rect.angle) <= params.light_max_angle &&
+            rect.size.width >= params.light_min_size &&
+            rect.size.height >= params.light_min_size &&
+            solidity >= params.light_contour_min_solidity &&
+            ratio <= params.light_max_ratio) {
+            
+            // 绘制外接矩形
+            Point2f vertices[4];
+            rect.points(vertices);
+            for (int j = 0; j < 4; j++) {
+                line(frame, vertices[j], vertices[(j + 1) % 4], Scalar(0, 255, 0), 2);
+            }
+            lightDescriptors.push_back(LightDescriptor(rect));
+        }
+    }
+    return lightDescriptors;
+}
+
+int main(int argc, char** argv) {
+    VideoCapture capture("../resourses/11.mp4");
+    if (!capture.isOpened()) {
+        cerr << "无法打开视频文件。" << endl;
+        return -1;
+    }
+
+    Mat frame;
+    ArmorParam params;
+    while (true) {
+        capture.read(frame);
+        if (frame.empty()) {
+            break;
+        }
+
+        // 检测装甲板
+        vector<LightDescriptor> detectedArmorPlates = detectArmorPlates(frame, params);
+
+        // 显示结果
+        for (const auto& armor : detectedArmorPlates) {
+            RotatedRect rect = armor.rec();
+            Point2f vertices[4];
+            rect.points(vertices);
+            for (int i = 0; i < 4; i++) {
+                line(frame, vertices[i], vertices[(i + 1) % 4], Scalar(0, 0, 255), 2);
+            }
+            circle(frame, rect.center, 5, Scalar(0, 255, 0), -1);
+        }
+        imshow("Armor Plate Detection", frame);
+        if (waitKey(30) >= 0) {
+            break;
+        }
+    }
+
+    capture.release();
+    destroyAllWindows();
+    return 0;
+}
+#include <iostream>
+#include <opencv2/opencv.hpp>
+
+using namespace std;
+using namespace cv;
+
+// 假设这里定义了 RED 和其他必要的常量
+enum EnemyColor { RED };
+
+// 颜色分离函数，返回提取目标颜色后的灰度图
+Mat separateColors(const Mat& _roiImg, EnemyColor _enemy_color) {
+    vector<Mat> channels;
+    // 把一个 3 通道图像转换成 3 个单通道图像
+    split(_roiImg, channels);
+
+    Mat grayImg;
+
+    // 剔除我们不想要的颜色
+    if (_enemy_color == RED) {
+        grayImg = channels.at(0) - channels.at(2); // B—R
+    } else {
+        grayImg = channels.at(2) - channels.at(0); // R - B
+    }
+    return grayImg;
+}
+
+Mat decreaseExposure(Mat image, double factor) {
+    Mat result = image.clone();
+    for (int i = 0; i < result.rows; i++) {
+        for (int j = 0; j < result.cols; j++) {
+            Vec3b& pixel = result.at<Vec3b>(i, j);
+            for (int k = 0; k < 3; k++) {
+                pixel[k] = static_cast<uchar>(pixel[k] * factor);
+            }
+        }
+    }
+    return result;
+}
+
+// 图像二值化函数
+Mat binarizeImage(Mat image, int threshold) {
+    Mat binaryImage;
+    cv::threshold(image, binaryImage, threshold, 255, THRESH_BINARY);
+    return binaryImage;
+}
+
+class ArmorParam {
+public:
+    int light_min_area = 700; // 最小面积
+    double light_max_angle = 45.0; // 最大角度
+    double light_min_size = 10.0; // 最小尺寸
+    double light_contour_min_solidity = 0.5; // 最小凸度
+    double light_max_ratio = 0.4; // 最大长宽比
+};
+
+class LightDescriptor {
+public:
+    LightDescriptor() {};
+    LightDescriptor(const RotatedRect& light) {
+        width = light.size.width;
+        length = light.size.height;
+        center = light.center;
+        angle = light.angle;
+        area = light.size.area();
+    }
+    RotatedRect rec() const {
+        return RotatedRect(center, Size2f(width, length), angle);
+    }
+    float width;
+    float length;
+    Point2f center;
+    float angle;
+    float area;
+};
+
+// 装甲板识别模块
+vector<LightDescriptor> detectArmorPlates(const Mat& frame, const ArmorParam& params) {
+    vector<LightDescriptor> lightDescriptors;
+    vector<vector<Point>> contours;
+    Mat thresh;
+    
+    // 图像预处理
+    Mat gray, blurred, threshed;
+    cvtColor(frame, gray, COLOR_BGR2GRAY);
+    GaussianBlur(gray, blurred, Size(9, 9), 2, 2);
+    threshold(blurred, threshed, 0, 255, THRESH_BINARY_INV + THRESH_OTSU);
+
+    // 轮廓检测
+    findContours(threshed, contours, RETR_EXTERNAL, CHAIN_APPROX_SIMPLE);
+    
+    // 轮廓筛选和特征提取
+    for (size_t i = 0; i < contours.size(); i++) {
+        RotatedRect rect = minAreaRect(contours[i]);
+        double area = contourArea(contours[i]);
+        double ratio = rect.size.width / rect.size.height;
+        double solidity = area / (rect.size.area());
+
+        if (area >= params.light_min_area &&
+            abs(rect.angle) <= params.light_max_angle &&
+            rect.size.width >= params.light_min_size &&
+            rect.size.height >= params.light_min_size &&
+            solidity >= params.light_contour_min_solidity &&
+            ratio <= params.light_max_ratio) {
+            
+            // 绘制外接矩形
+            Point2f vertices[4];
+            rect.points(vertices);
+            for (int j = 0; j < 4; j++) {
+                line(frame, vertices[j], vertices[(j + 1) % 4], Scalar(0, 255, 0), 2);
+            }
+            lightDescriptors.push_back(LightDescriptor(rect));
+        }
+    }
+    return lightDescriptors;
+}
+
+int main(int argc, char** argv) {
+    VideoCapture capture("../resourses/11.mp4");
+    if (!capture.isOpened()) {
+        cerr << "无法打开视频文件。" << endl;
+        return -1;
+    }
+
+    // 使用 H.264 编解码器创建视频写入器
+    VideoWriter writer("output_video.mp4", VideoWriter::fourcc('h', '2', '6', '4'), capture.get(CAP_PROP_FPS), Size(capture.get(CAP_PROP_FRAME_WIDTH), capture.get(CAP_PROP_FRAME_HEIGHT)));
+
+    Mat frame;
+    double exposureFactor = 0.3; // 曝光降低因子，可根据需要调整
+    int binaryThreshold = 50; // 二值化阈值，可以根据实际情况调整
+    int brightness_threshold = 100; // 设置阈值，根据相机拍摄实际情况调整
+
+    while (true) {
+        capture.read(frame);
+        if (frame.empty()) {
+            break;
+        }
+
+        // 降低曝光
+        Mat decreasedExposureFrame = decreaseExposure(frame, exposureFactor);
+
+        // 进行颜色分离（假设这里只处理红色）
+        Mat separatedColorsFrame = separateColors(decreasedExposureFrame, RED);
+
+        // 二值化
+        Mat binaryFrame = binarizeImage(separatedColorsFrame, binaryThreshold);
+
+        // 再次阈值化和膨胀处理
+        Mat binBrightImg;
+        threshold(binaryFrame, binBrightImg, brightness_threshold, 255, THRESH_BINARY);
+        Mat element = getStructuringElement(MORPH_ELLIPSE, Size(3, 3));
+        dilate(binBrightImg, binBrightImg, element);
+
+        // 检测装甲板
+        vector<LightDescriptor> detectedArmorPlates = detectArmorPlates(binBrightImg, ArmorParam());
+
+        // 确保图像是三通道格式
+        if (frame.channels()!= 3) {
+            cvtColor(frame, frame, COLOR_GRAY2BGR);
+        }
+
+        // 显示结果
+        for (const auto& armor : detectedArmorPlates) {
+            RotatedRect rect = armor.rec();
+            Point2f vertices[4];
+            rect.points(vertices);
+            for (int i = 0; i < 4; i++) {
+                line(frame, vertices[i], vertices[(i + 1) % 4], Scalar(0, 0, 255), 2);
+            }
+            circle(frame, rect.center, 5, Scalar(0, 255, 0), -1);
+        }
+        imshow("Armor Plate Detection", frame);
+        if (waitKey(30) >= 0) {
+            break;
+        }
+    }
+
+    capture.release();
+    writer.release();
+    destroyAllWindows();
+    return 0;
+}#include <iostream>
+#include <opencv2/opencv.hpp>
+
+using namespace std;
+using namespace cv;
+
+// 假设这里定义了 RED 和其他必要的常量
+enum EnemyColor { RED };
+
+// 颜色分离函数，返回提取目标颜色后的灰度图
+Mat separateColors(const Mat& _roiImg, EnemyColor _enemy_color) {
+    vector<Mat> channels;
+    // 把一个 3 通道图像转换成 3 个单通道图像
+    split(_roiImg, channels);
+
+    Mat grayImg;
+
+    // 剔除我们不想要的颜色
+    if (_enemy_color == RED) {
+        grayImg = channels.at(0) - channels.at(2); // B—R
+    } else {
+        grayImg = channels.at(2) - channels.at(0); // R - B
+    }
+    return grayImg;
+}
+
+Mat decreaseExposure(Mat image, double factor) {
+    Mat result = image.clone();
+    for (int i = 0; i < result.rows; i++) {
+        for (int j = 0; j < result.cols; j++) {
+            Vec3b& pixel = result.at<Vec3b>(i, j);
+            for (int k = 0; k < 3; k++) {
+                pixel[k] = static_cast<uchar>(pixel[k] * factor);
+            }
+        }
+    }
+    return result;
+}
+
+// 图像二值化函数
+Mat binarizeImage(Mat image, int threshold) {
+    Mat binaryImage;
+    cv::threshold(image, binaryImage, threshold, 255, THRESH_BINARY);
+    return binaryImage;
+}
+
+class ArmorParam {
+public:
+    int light_min_area = 700; // 最小面积
+    double light_max_angle = 45.0; // 最大角度
+    double light_min_size = 10.0; // 最小尺寸
+    double light_contour_min_solidity = 0.5; // 最小凸度
+    double light_max_ratio = 0.4; // 最大长宽比
+};
+
+class LightDescriptor {
+public:
+    LightDescriptor() {};
+    LightDescriptor(const RotatedRect& light) {
+        width = light.size.width;
+        length = light.size.height;
+        center = light.center;
+        angle = light.angle;
+        area = light.size.area();
+    }
+    RotatedRect rec() const {
+        return RotatedRect(center, Size2f(width, length), angle);
+    }
+    float width;
+    float length;
+    Point2f center;
+    float angle;
+    float area;
+};
+
+// 装甲板识别模块
+vector<LightDescriptor> detectArmorPlates(const Mat& frame, const ArmorParam& params) {
+    vector<LightDescriptor> lightDescriptors;
+    vector<vector<Point>> contours;
+    Mat thresh;
+    
+    // 图像预处理
+    Mat gray, blurred, threshed;
+    cvtColor(frame, gray, COLOR_BGR2GRAY);
+    GaussianBlur(gray, blurred, Size(9, 9), 2, 2);
+    threshold(blurred, threshed, 0, 255, THRESH_BINARY_INV + THRESH_OTSU);
+
+    // 轮廓检测
+    findContours(threshed, contours, RETR_EXTERNAL, CHAIN_APPROX_SIMPLE);
+    
+    // 轮廓筛选和特征提取
+    for (size_t i = 0; i < contours.size(); i++) {
+        RotatedRect rect = minAreaRect(contours[i]);
+        double area = contourArea(contours[i]);
+        double ratio = rect.size.width / rect.size.height;
+        double solidity = area / (rect.size.area());
+
+        if (area >= params.light_min_area &&
+            abs(rect.angle) <= params.light_max_angle &&
+            rect.size.width >= params.light_min_size &&
+            rect.size.height >= params.light_min_size &&
+            solidity >= params.light_contour_min_solidity &&
+            ratio <= params.light_max_ratio) {
+            
+            // 绘制外接矩形
+            Point2f vertices[4];
+            rect.points(vertices);
+            for (int j = 0; j < 4; j++) {
+                line(frame, vertices[j], vertices[(j + 1) % 4], Scalar(0, 255, 0), 2);
+            }
+            lightDescriptors.push_back(LightDescriptor(rect));
+        }
+    }
+    return lightDescriptors;
+}
+
+int main(int argc, char** argv) {
+    VideoCapture capture("../resourses/11.mp4");
+    if (!capture.isOpened()) {
+        cerr << "无法打开视频文件。" << endl;
+        return -1;
+    }
+
+    // 尝试使用不同的编解码器和容器格式
+    VideoWriter writer("output_video.avi", VideoWriter::fourcc('X', 'V', 'I', 'D'), capture.get(CAP_PROP_FPS), Size(capture.get(CAP_PROP_FRAME_WIDTH), capture.get(CAP_PROP_FRAME_HEIGHT)));
+
+    Mat frame;
+    double exposureFactor = 0.3; // 曝光降低因子，可根据需要调整
+    int binaryThreshold = 50; // 二值化阈值，可以根据实际情况调整
+    int brightness_threshold = 100; // 设置阈值，根据相机拍摄实际情况调整
+
+    while (true) {
+        capture.read(frame);
+        if (frame.empty()) {
+            break;
+        }
+
+        // 降低曝光
+        Mat decreasedExposureFrame = decreaseExposure(frame, exposureFactor);
+
+        // 进行颜色分离（假设这里只处理红色）
+        Mat separatedColorsFrame = separateColors(decreasedExposureFrame, RED);
+
+        // 二值化
+        Mat binaryFrame = binarizeImage(separatedColorsFrame, binaryThreshold);
+
+        // 再次阈值化和膨胀处理
+        Mat binBrightImg;
+        threshold(binaryFrame, binBrightImg, brightness_threshold, 255, THRESH_BINARY);
+        Mat element = getStructuringElement(MORPH_ELLIPSE, Size(3, 3));
+        dilate(binBrightImg, binBrightImg, element);
+
+        // 检测装甲板
+        vector<LightDescriptor> detectedArmorPlates = detectArmorPlates(binBrightImg, ArmorParam());
+
+        // 确保图像是三通道格式
+        if (frame.channels()!= 3) {
+            cvtColor(frame, frame, COLOR_GRAY2BGR);
+        }
+
+        // 显示结果
+        for (const auto& armor : detectedArmorPlates) {
+            RotatedRect rect = armor.rec();
+            Point2f vertices[4];
+            rect.points(vertices);
+            for (int i = 0; i < 4; i++) {
+                line(frame, vertices[i], vertices[(i + 1) % 4], Scalar(0, 0, 255), 2);
+            }
+            circle(frame, rect.center, 5, Scalar(0, 255, 0), -1);
+        }
+        imshow("Armor Plate Detection", frame);
+        if (waitKey(30) >= 0) {
+            break;
+        }
+    }
+
+    capture.release();
+    writer.release();
+    destroyAllWindows();
+    return 0;
+}
+#include <iostream>
+#include <opencv2/opencv.hpp>
+
+using namespace std;
+using namespace cv;
+
+// 假设这里定义了 RED 和其他必要的常量
+enum EnemyColor { RED };
+
+// 颜色分离函数，返回提取目标颜色后的灰度图
+Mat separateColors(const Mat& _roiImg, EnemyColor _enemy_color) {
+    vector<Mat> channels;
+    // 把一个 3 通道图像转换成 3 个单通道图像
+    split(_roiImg, channels);
+
+    Mat grayImg;
+
+    // 剔除我们不想要的颜色
+    if (_enemy_color == RED) {
+        grayImg = channels.at(0) - channels.at(2); // B—R
+    } else {
+        grayImg = channels.at(2) - channels.at(0); // R - B
+    }
+    return grayImg;
+}
+
+Mat decreaseExposure(Mat image, double factor) {
+    Mat result = image.clone();
+    for (int i = 0; i < result.rows; i++) {
+        for (int j = 0; j < result.cols; j++) {
+            Vec3b& pixel = result.at<Vec3b>(i, j);
+            for (int k = 0; k < 3; k++) {
+                pixel[k] = static_cast<uchar>(pixel[k] * factor);
+            }
+        }
+    }
+    return result;
+}
+
+// 图像二值化函数
+Mat binarizeImage(Mat image, int threshold) {
+    Mat binaryImage;
+    cv::threshold(image, binaryImage, threshold, 255, THRESH_BINARY);
+    return binaryImage;
+}
+
+class ArmorParam {
+public:
+    int light_min_area = 700; // 最小面积
+    double light_max_angle = 45.0; // 最大角度
+    double light_min_size = 10.0; // 最小尺寸
+    double light_contour_min_solidity = 0.5; // 最小凸度
+    double light_max_ratio = 0.4; // 最大长宽比
+};
+
+class LightDescriptor {
+public:
+    LightDescriptor() {};
+    LightDescriptor(const RotatedRect& light) {
+        width = light.size.width;
+        length = light.size.height;
+        center = light.center;
+        angle = light.angle;
+        area = light.size.area();
+    }
+    RotatedRect rec() const {
+        return RotatedRect(center, Size2f(width, length), angle);
+    }
+    float width;
+    float length;
+    Point2f center;
+    float angle;
+    float area;
+};
+
+// 装甲板识别模块
+vector<LightDescriptor> detectArmorPlates(const Mat& frame, const ArmorParam& params) {
+    vector<LightDescriptor> lightDescriptors;
+    vector<vector<Point>> contours;
+    Mat thresh;
+    
+    // 图像预处理
+    Mat gray, blurred, threshed;
+    cvtColor(frame, gray, COLOR_BGR2GRAY);
+    GaussianBlur(gray, blurred, Size(9, 9), 2, 2);
+    threshold(blurred, threshed, 0, 255, THRESH_BINARY_INV + THRESH_OTSU);
+
+    // 轮廓检测
+    findContours(threshed, contours, RETR_EXTERNAL, CHAIN_APPROX_SIMPLE);
+    
+    // 轮廓筛选和特征提取
+    for (size_t i = 0; i < contours.size(); i++) {
+        RotatedRect rect = minAreaRect(contours[i]);
+        double area = contourArea(contours[i]);
+        double ratio = rect.size.width / rect.size.height;
+        double solidity = area / (rect.size.area());
+
+        if (area >= params.light_min_area &&
+            abs(rect.angle) <= params.light_max_angle &&
+            rect.size.width >= params.light_min_size &&
+            rect.size.height >= params.light_min_size &&
+            solidity >= params.light_contour_min_solidity &&
+            ratio <= params.light_max_ratio) {
+            
+            // 绘制外接矩形
+            Point2f vertices[4];
+            rect.points(vertices);
+            for (int j = 0; j < 4; j++) {
+                line(frame, vertices[j], vertices[(j + 1) % 4], Scalar(0, 255, 0), 2);
+            }
+            lightDescriptors.push_back(LightDescriptor(rect));
+        }
+    }
+    return lightDescriptors;
+}
+
+int main(int argc, char** argv) {
+    VideoCapture capture("../resourses/11.mp4");
+    if (!capture.isOpened()) {
+        cerr << "无法打开视频文件。" << endl;
+        return -1;
+    }
+
+    // 尝试使用不同的编解码器和容器格式
+    VideoWriter writer("output_video.avi", VideoWriter::fourcc('X', 'V', 'I', 'D'), capture.get(CAP_PROP_FPS), Size(capture.get(CAP_PROP_FRAME_WIDTH), capture.get(CAP_PROP_FRAME_HEIGHT)));
+
+    Mat frame;
+    double exposureFactor = 0.3; // 曝光降低因子，可根据需要调整
+    int binaryThreshold = 50; // 二值化阈值，可以根据实际情况调整
+    int brightness_threshold = 100; // 设置阈值，根据相机拍摄实际情况调整
+
+    while (true) {
+        capture.read(frame);
+        if (frame.empty()) {
+            break;
+        }
+
+        // 降低曝光
+        Mat decreasedExposureFrame = decreaseExposure(frame, exposureFactor);
+
+        // 进行颜色分离（假设这里只处理红色）
+        Mat separatedColorsFrame = separateColors(decreasedExposureFrame, RED);
+
+        // 二值化
+        Mat binaryFrame = binarizeImage(separatedColorsFrame, binaryThreshold);
+
+        // 再次阈值化和膨胀处理
+        Mat binBrightImg;
+        threshold(binaryFrame, binBrightImg, brightness_threshold, 255, THRESH_BINARY);
+        Mat element = getStructuringElement(MORPH_ELLIPSE, Size(3, 3));
+        dilate(binBrightImg, binBrightImg, element);
+
+        // 检测装甲板
+        vector<LightDescriptor> detectedArmorPlates = detectArmorPlates(binBrightImg, ArmorParam());
+
+        // 确保图像是三通道格式
+        if (frame.channels()!= 3) {
+            cvtColor(frame, frame, COLOR_GRAY2BGR);
+        }
+
+        // 显示结果
+        for (const auto& armor : detectedArmorPlates) {
+            RotatedRect rect = armor.rec();
+            Point2f vertices[4];
+            rect.points(vertices);
+            for (int i = 0; i < 4; i++) {
+                line(frame, vertices[i], vertices[(i + 1) % 4], Scalar(0, 0, 255), 2);
+            }
+            circle(frame, rect.center, 5, Scalar(0, 255, 0), -1);
+        }
+        imshow("Armor Plate Detection", frame);
+        if (waitKey(30) >= 0) {
+            break;
+        }
+    }
+
+    capture.release();
+    writer.release();
+    destroyAllWindows();
+    return 0;
+}
+#include <iostream>
+#include <opencv2/opencv.hpp>
+#include <ctime>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <termios.h>
+#include <unistd.h>
+
+using namespace std;
+using namespace cv;
+
+// 定义用于调整矩形的模式常量
+const int WIDTH_GREATER_THAN_HEIGHT = 1;
+const int ANGLE_TO_UP = 2;
+
+enum EnemyColor { RED };
+
+// 颜色分离函数
+Mat separateColors(const Mat& img, EnemyColor color) {
+    vector<Mat> channels;
+    split(img, channels);
+    Mat grayImg;
+    if (color == RED) {
+        grayImg = channels.at(0) - channels.at(2);
+    } else {
+        grayImg = channels.at(2) - channels.at(0);
+    }
+    return grayImg;
+}
+
+// 降低曝光函数
+Mat decreaseExposure(Mat img, double factor) {
+    Mat result = img.clone();
+    for (int i = 0; i < result.rows; i++) {
+        for (int j = 0; j < result.cols; j++) {
+            Vec3b& pixel = result.at<Vec3b>(i, j);
+            for (int k = 0; k < 3; k++) {
+                pixel[k] = static_cast<uchar>(pixel[k] * factor);
+            }
+        }
+    }
+    return result;
+}
+
+// 图像二值化函数
+Mat binarizeImage(Mat img, int threshold) {
+    Mat binaryImage;
+    cv::threshold(img, binaryImage, threshold, 255, THRESH_BINARY);
+    return binaryImage;
+}
+
+class ArmorParam {
+public:
+    int light_min_area = 700;
+    double light_max_angle = 45.0;
+    double light_min_size = 10.0;
+    double light_contour_min_solidity = 0.5;
+    double light_max_ratio = 0.4;
+};
+
+class LightDescriptor {
+public:
+    LightDescriptor() {};
+    LightDescriptor(const RotatedRect& light) {
+        width = light.size.width;
+        length = light.size.height;
+        center = light.center;
+        angle = light.angle;
+        area = light.size.area();
+    }
+    const LightDescriptor& operator=(const LightDescriptor& ld) {
+        this->width = ld.width;
+        this->length = ld.length;
+        this->center = ld.center;
+        this->angle = ld.angle;
+        this->area = ld.area;
+        return *this;
+    }
+    Size2f getDoubleLengthSize() const {
+        return Size2f(width, length * 2);
+    }
+    RotatedRect rec() const {
+        return RotatedRect(center, Size2f(width, length), angle);
+    }
+
+public:
+    float width;
+    float length;
+    Point2f center;
+    float angle;
+    float area;
+};
+
+// 判断两个灯条是否可能组成装甲板
+bool isArmorPlate(const LightDescriptor& light1, const LightDescriptor& light2) {
+    const double angleDiffThreshold = 10.0;
+    const double distanceThreshold = 90.0;
+    double angleDiff = abs(light1.angle - light2.angle);
+    double distance = norm(light1.center - light2.center);
+    return angleDiff <= angleDiffThreshold && distance <= distanceThreshold;
+}
+
+// 调整矩形方向辅助函数
+RotatedRect& adjustRec(RotatedRect& rec, const int mode) {
+    float& width = rec.size.width;
+    float& height = rec.size.height;
+    float& angle = rec.angle;
+    if (mode == WIDTH_GREATER_THAN_HEIGHT) {
+        if (width < height) {
+            swap(width, height);
+            angle += 90.0;
+        }
+    }
+    while (angle >= 90.0) angle -= 180.0;
+    while (angle < -90.0) angle += 180.0;
+    if (mode == ANGLE_TO_UP) {
+        if (angle >= 45.0) {
+            swap(width, height);
+            angle -= 90.0;
+        } else if (angle < -45.0) {
+            swap(width, height);
+            angle += 90.0;
+        }
+    }
+    return rec;
+}
+
+// 限幅滤波函数
+int filter(int effective_value, int new_value, int delat_max) {
+    if ((new_value - effective_value > delat_max) || (effective_value - new_value > delat_max)) {
+        new_value = effective_value;
+        return effective_value;
+    } else {
+        new_value = effective_value;
+        return new_value;
+    }
+}
+
+// 打开串口函数
+int open_uart(const char* port) {
+    int fd = open(port, O_RDWR | O_NOCTTY | O_NDELAY);
+    if (fd == -1) {
+        perror("打开串口失败");
+    } else {
+        fcntl(fd, F_SETFL, 0);
+    }
+    return fd;
+}
+
+// 设置串口属性函数
+int set_uart_attr(int fd, int baud_rate, int data_bits, char parity, int stop_bits) {
+    struct termios options;
+    tcgetattr(fd, &options);
+    cfsetispeed(&options, baud_rate);
+    cfsetospeed(&options, baud_rate);
+    options.c_cflag &= ~CSIZE;
+    switch (data_bits) {
+    case 5:
+        options.c_cflag |= CS5;
+        break;
+    case 6:
+        options.c_cflag |= CS6;
+        break;
+    case 7:
+        options.c_cflag |= CS7;
+        break;
+    case 8:
+        options.c_cflag |= CS8;
+        break;
+    default:
+        fprintf(stderr, "不支持的数据位数\n");
+        return -1;
+    }
+    switch (parity) {
+    case 'N':
+    case 'n':
+        options.c_cflag &= ~PARENB;
+        options.c_iflag &= ~INPCK;
+        break;
+    case 'O':
+    case 'o':
+        options.c_cflag |= (PARODD | PARENB);
+        options.c_iflag |= INPCK;
+        break;
+    case 'E':
+    case 'e':
+        options.c_cflag |= PARENB;
+        options.c_cflag &= ~PARODD;
+        options.c_iflag |= INPCK;
+        break;
+    default:
+        fprintf(stderr, "不支持的校验位\n");
+        return -1;
+    }
+    switch (stop_bits) {
+    case 1:
+        options.c_cflag &= ~CSTOPB;
+        break;
+    case 2:
+        options.c_cflag |= CSTOPB;
+        break;
+    default:
+        fprintf(stderr, "不支持的停止位\n");
+        return -1;
+    }
+    options.c_cc[VTIME] = 150;
+    options.c_cc[VMIN] = 0;
+    tcflush(fd, TCIFLUSH);
+    if (tcsetattr(fd, TCSANOW, &options)!= 0) {
+        perror("设置串口属性失败");
+        return -1;
+    }
+    return 0;
+}
+
+int main() {
+    VideoCapture cap("../resourses/11.mp4");
+    if (!cap.isOpened()) {
+        cerr << "无法打开视频文件。" << endl;
+        return -1;
+    }
+
+    VideoWriter writer("output_video.mp4", VideoWriter::fourcc('M', 'P', '4', 'V'), cap.get(CAP_PROP_FPS), Size(cap.get(CAP_PROP_FRAME_WIDTH), cap.get(CAP_PROP_FRAME_HEIGHT)));
+
+    Mat frame;
+    double exposureFactor = 0.3;
+    int binaryThreshold = 50;
+    int brightness_threshold = 100;
+
+    while (true) {
+        bool success = cap.read(frame);
+        if (!success) {
+            break;
+        }
+
+        // 降低曝光
+        Mat decreasedExposureFrame = decreaseExposure(frame, exposureFactor);
+
+        // 颜色分离
+        Mat separatedColorsFrame = separateColors(decreasedExposureFrame, RED);
+
+        // 二值化
+        Mat binaryFrame = binarizeImage(separatedColorsFrame, binaryThreshold);
+
+        // 再次阈值化和膨胀处理
+        Mat binBrightImg;
+        threshold(binaryFrame, binBrightImg, brightness_threshold, 255, THRESH_BINARY);
+        Mat element = getStructuringElement(MORPH_ELLIPSE, Size(3, 3));
+        dilate(binBrightImg, binBrightImg, element);
+
+        // 找轮廓
+        vector<vector<Point>> lightContours;
+        findContours(binBrightImg.clone(), lightContours, RETR_EXTERNAL, CHAIN_APPROX_SIMPLE);
+
+        // 过滤和处理轮廓
+        ArmorParam armorParam;
+        vector<LightDescriptor> validLightDescriptors;
+        for (const auto& contour : lightContours) {
+            RotatedRect rect = minAreaRect(contour);
+            double area = contourArea(contour);
+            double ratio = rect.size.width / rect.size.height;
+            double solidity = area / rect.size.area();
+            if (area >= armorParam.light_min_area &&
+                abs(rect.angle) <= armorParam.light_max_angle &&
+                rect.size.width >= armorParam.light_min_size &&
+                rect.size.height >= armorParam.light_min_size &&
+                solidity >= armorParam.light_contour_min_solidity &&
+                ratio <= armorParam.light_max_ratio) {
+                LightDescriptor lightDescriptor(rect);
+                validLightDescriptors.push_back(lightDescriptor);
+            }
+        }
+
+        // 识别装甲板
+        vector<RotatedRect> vRec;
+        for (size_t i = 0; i < validLightDescriptors.size(); i++) {
+            for (size_t j = i + 1; j < validLightDescriptors.size(); j++) {
+                float Contour_angle = abs(validLightDescriptors[i].angle - validLightDescriptors[j].angle);
+                if (Contour_angle >= 7)
+                    continue;
+                // 修改后
+   float Contour_Len1 = abs(validLightDescriptors[i].length - validLightDescriptors[j].length) / max(validLightDescriptors[i].length, validLightDescriptors[j].length);
+   float Contour_Len2 = abs(validLightDescriptors[i].width - validLightDescriptors[j].width) / max(validLightDescriptors[i].width, validLightDescriptors[j].width);
+   
+                if (Contour_Len1 > 0.25 || Contour_Len2 > 0.25)
+                    continue;
+
+                RotatedRect ZJB;
+                ZJB.center.x = (validLightDescriptors[i].center.x + validLightDescriptors[j].center.x) / 2.;
+                ZJB.center.y = (validLightDescriptors[i].center.y + validLightDescriptors[j].center.y) / 2.;
+                ZJB.angle = (validLightDescriptors[i].angle + validLightDescriptors[j].angle) / 2.;
+                float nw, yDiff, xDiff;
+                
+                float nh = (validLightDescriptors[i].length + validLightDescriptors[j].length) / 2;
+                nw = sqrt((validLightDescriptors[i].center.x - validLightDescriptors[j].center.x) * (validLightDescriptors[i].center.x - validLightDescriptors[j].center.x) + (validLightDescriptors[i].center.y - validLightDescriptors[j].center.y) * (validLightDescriptors[i].center.y - validLightDescriptors[j].center.y));
+                float ratio = nw / nh;
+                xDiff = abs(validLightDescriptors[i].center.x - validLightDescriptors[j].center.x) / nh;
+                yDiff = abs(validLightDescriptors[i].center.y - validLightDescriptors[j].center.y) / nh;
+                if (ratio < 1.0 || ratio > 5.0 || xDiff < 0.5 || yDiff > 2.0)
+                    continue;
+                ZJB.size.height = nh;
+                ZJB.size.width = nw;
+                vRec.push_back(ZJB);
+            }
+        }
+
+        // 绘制装甲板轮廓
+        Mat debugImg = frame.clone();
+            for (const auto& rect : vRec) {
+        Point2f vertices[4];
+        rect.points(vertices);
+        for (int k = 0; k < 4; k++) {
+            line(debugImg, vertices[k], vertices[(k + 1) % 4], Scalar(255, 0, 0), 2);
+        }
+        Point2f point1;
+        Point2f point2;
+        point1.x = rect.center.x;
+        point1.y = rect.center.y + 20;
+        point2.x = rect.center.x;
+        point2.y = rect.center.y - 20;
+
+        cv::Point2f newCenter(filter(rect.center.x, rect.center.x, 10), filter(rect.center.y, rect.center.y, 10));
+        RotatedRect newRect(rect.size, newCenter, rect.angle);
+        rectangle(debugImg, point1, point2, Scalar(0, 120, 255), 2);
+        circle(debugImg, newCenter, 10, Scalar(0, 120, 255));
+    }
+
+
+        // 显示图像
+        imshow("contours", debugImg);
+        writer.write(binBrightImg);
+
+        if (waitKey(30) >= 0) {
+            break;
+        }
+    }
+
+    cap.release();
+    writer.release();
+    destroyAllWindows();
+
+    return 0;
+}
+
+
+
+#include <iostream>
+#include <opencv2/opencv.hpp>
+
+using namespace std;
+using namespace cv;
+
+// 定义用于调整矩形的模式常量
+const int WIDTH_GREATER_THAN_HEIGHT = 1;
+const int ANGLE_TO_UP = 2;
+
+// 枚举颜色选择
+enum ColorChoice { RED, BLUE };
+
+// 颜色分离函数
+Mat performColorSeparation(const Mat& image, ColorChoice colorChoice) {
+    vector<Mat> channels;
+    split(image, channels);
+    Mat grayImage;
+    if (colorChoice == RED) {
+        grayImage = channels[0] - channels[2];
+    } else if (colorChoice == BLUE) {
+        grayImage = channels[2] - channels[0];
+    }
+    return grayImage;
+}
+
+// 降低曝光函数
+Mat reduceExposure(Mat image, double factor) {
+    Mat result = image.clone();
+    for (int i = 0; i < result.rows; ++i) {
+        for (int j = 0; j < result.cols; ++j) {
+            Vec3b& pixel = result.at<Vec3b>(i, j);
+            for (int k = 0; k < 3; ++k) {
+                pixel[k] #include <iostream>
+#include <opencv2/opencv.hpp>
+
+using namespace std;
+using namespace cv;
+
+// 定义用于调整矩形的模式常量
+const int WIDTH_GREATER_THAN_HEIGHT = 1;
+const int ANGLE_TO_UP = 2;
+
+// 枚举颜色选择
+enum ColorChoice { RED, BLUE };
+
+// 颜色分离函数
+Mat performColorSeparation(const Mat& image, ColorChoice colorChoice) {
+    vector<Mat> channels;
+    split(image, channels);
+    Mat grayImage;
+    if (colorChoice == RED) {
+        grayImage = channels[0] - channels[2];
+    } else if (colorChoic= static_cast<uchar>(pixel[k] * factor);
+            }
+        }
+    }
+    return result;
+}
+
+// 图像二值化函数
+Mat performBinaryThresholding(Mat image, int threshold) {
+    Mat binaryImage;
+    cv::threshold(image, binaryImage, threshold, 255, THRESH_BINARY);
+    return binaryImage;
+}
+
+class ArmorParameters {
+public:
+    int minLightArea = 700;
+    double maxLightAngle = 45.0;
+    double minLightSize = 10.0;
+    double minLightContourSolidity = 0.5;
+    double maxLightRatio = 0.4;
+};
+
+class LightDescriptor {
+public:
+    LightDescriptor() {};
+    LightDescriptor(const RotatedRect& light) {
+        width = light.size.width;
+        height = light.size.height;
+        center = light.center;
+        angle = light.angle;
+        area = light.size.area();
+    }
+    const LightDescriptor& operator=(const LightDescriptor& ld) {
+        this->width = ld.width;
+        this->height = ld.height;
+        this->center = ld.center;
+        this->angle = ld.angle;
+        this->area = ld.area;
+        return *this;
+    }
+    Size2f getDoubleHeightSize() const {
+        return Size2f(width, height * 2);
+    }
+    RotatedRect getRect() const {
+        return RotatedRect(center, Size2f(width, height), angle);
+    }
+
+public:
+    float width;
+    float height;
+    Point2f center;
+    float angle;
+    float area;
+};
+
+// 判断两个灯条是否可能组成装甲板
+bool isArmorPlatePossible(const LightDescriptor& light1, const LightDescriptor& light2) {
+    const double angleDiffThreshold = 100.0;
+    const double distanceThreshold = 500.0;
+    double angleDifference = abs(light1.angle - light2.angle);
+    double distance = norm(light1.center - light2.center);
+    return angleDifference <= angleDiffThreshold && distance <= distanceThreshold;
+}
+
+// 调整矩形方向辅助函数
+RotatedRect& adjustRectangle(RotatedRect& rect, const int mode) {
+    float& width = rect.size.width;
+    float& height = rect.size.height;
+    float& angle = rect.angle;
+    if (mode == WIDTH_GREATER_THAN_HEIGHT) {
+        if (width < height) {
+            swap(width, height);
+            angle += 90.0;
+        }
+    }
+    while (angle >= 90.0) angle -= 180.0;
+    while (angle < -90.0) angle += 180.0;
+    if (mode == ANGLE_TO_UP) {
+        if (angle >= 45.0) {
+            swap(width, height);
+            angle -= 90.0;
+        } else if (angle < -45.0) {
+            swap(width, height);
+            angle += 90.0;
+        }
+    }
+    return rect;
+}
+
+// 限幅滤波函数
+int applyFiltering(int effectiveValue, int newValue, int maxDifference) {
+    if ((newValue - effectiveValue > maxDifference) || (effectiveValue - newValue > maxDifference)) {
+        newValue = effectiveValue;
+        return effectiveValue;
+    } else {
+        newValue = effectiveValue;
+        return newValue;
+    }
+}
+
+int main() {
+    VideoCapture videoCapture("../resourses/11.mp4");
+    if (!videoCapture.isOpened()) {
+        cerr << "无法打开视频文件。" << endl;
+        return -1;
+    }
+
+    VideoWriter videoWriter("output_video.mp4", VideoWriter::fourcc('M', 'P', '4', 'V'), videoCapture.get(CAP_PROP_FPS), Size(videoCapture.get(CAP_PROP_FRAME_WIDTH), videoCapture.get(CAP_PROP_FRAME_HEIGHT)));
+
+    Mat frame;
+    double exposureReductionFactor = 0.3;
+    int binaryThresholdValue = 50;
+    int brightnessThreshold = 100;
+
+    // 用户输入颜色选择
+    cout << "请选择颜色（0：红色，1：蓝色）：";
+    int colorChoiceInput;
+    cin >> colorChoiceInput;
+    ColorChoice colorChoice = static_cast<ColorChoice>(colorChoiceInput);
+
+    while (true) {
+        bool readSuccess = videoCapture.read(frame);
+        if (!readSuccess) {
+            break;
+        }
+
+        // 降低曝光
+        Mat reducedExposureFrame = reduceExposure(frame, exposureReductionFactor);
+
+        // 颜色分离
+        Mat separatedColorsFrame = performColorSeparation(reducedExposureFrame, colorChoice);
+
+        // 二值化
+        Mat binaryFrame = performBinaryThresholding(separatedColorsFrame, binaryThresholdValue);
+
+        // 再次阈值化和膨胀处理
+        Mat brightBinaryImage;
+        cv::threshold(binaryFrame, brightBinaryImage, brightnessThreshold, 255, THRESH_BINARY);
+        Mat structuringElement = getStructuringElement(MORPH_ELLIPSE, Size(3, 3));
+        dilate(brightBinaryImage, brightBinaryImage, structuringElement);
+
+        // 找轮廓
+        vector<vector<Point>> lightContours;
+        findContours(brightBinaryImage.clone(), lightContours, RETR_EXTERNAL, CHAIN_APPROX_SIMPLE);
+
+        // 过滤和处理轮廓
+        ArmorParameters armorParams;
+        vector<LightDescriptor> validLightDescriptors;
+        for (const auto& contour : lightContours) {
+            RotatedRect rect = minAreaRect(contour);
+            double area = contourArea(contour);
+            double ratio = rect.size.width / rect.size.height;
+            double solidity = area / rect.size.area();
+            if (area >= armorParams.minLightArea &&
+                abs(rect.angle) <= armorParams.maxLightAngle &&
+                rect.size.width >= armorParams.minLightSize &&
+                rect.size.height >= armorParams.minLightSize &&
+                solidity >= armorParams.minLightContourSolidity &&
+                ratio <= armorParams.maxLightRatio) {
+                LightDescriptor lightDescriptor(rect);
+                validLightDescriptors.push_back(lightDescriptor);
+            }
+        }
+
+        // 识别装甲板
+        vector<RotatedRect> armorRectangles;
+        for (size_t i = 0; i < validLightDescriptors.size(); ++i) {
+            for (size_t j = i + 1; j < validLightDescriptors.size(); ++j) {
+                float angleDifference = abs(validLightDescriptors[i].angle - validLightDescriptors[j].angle);
+                if (angleDifference >= 7) continue;
+
+                float lengthDifference1 = abs(validLightDescriptors[i].height - validLightDescriptors[j].height) / max(validLightDescriptors[i].height, validLightDescriptors[j].height);
+                float lengthDifference2 = abs(validLightDescriptors[i].width - validLightDescriptors[j].width) / max(validLightDescriptors[i].width, validLightDescriptors[j].width);
+                if (lengthDifference1 > 0.25 || lengthDifference2 > 0.25) continue;
+
+                RotatedRect tempRect;
+                tempRect.center.x = (validLightDescriptors[i].center.x + validLightDescriptors[j].center.x) / 2.0;
+                tempRect.center.y = (validLightDescriptors[i].center.y + validLightDescriptors[j].center.y) / 2.0;
+                tempRect.angle = (validLightDescriptors[i].angle + validLightDescriptors[j].angle) / 2.0;
+                float halfHeightSum = (validLightDescriptors[i].height + validLightDescriptors[j].height) / 2.0;
+                float distanceBetweenCenters = sqrt(pow(validLightDescriptors[i].center.x - validLightDescriptors[j].center.x, 2) + pow(validLightDescriptors[i].center.y - validLightDescriptors[j].center.y, 2));
+                float ratio = distanceBetweenCenters / halfHeightSum;
+                float xDifference = abs(validLightDescriptors[i].center.x - validLightDescriptors[j].center.x) / halfHeightSum;
+                float yDifference = abs(validLightDescriptors[i].center.y - validLightDescriptors[j].center.y) / halfHeightSum;
+                if (ratio < 1.0 || ratio > 5.0 || xDifference < 0.5 || yDifference > 2.0) continue;
+                tempRect.size.height = halfHeightSum;
+                tempRect.size.width = distanceBetweenCenters;
+                armorRectangles.push_back(tempRect);
+            }
+        }
+
+        // 绘制装甲板轮廓
+        Mat debugImage = frame.clone();
+        for (const auto& rect : armorRectangles) {
+            // 调整长度为原来的二倍
+            Size2f newSize(rect.size.width, rect.size.height * 2);
+            RotatedRect newRect(rect.center, newSize, rect.angle);
+
+            Point2f vertices[4];
+            newRect.points(vertices);
+            for (int k = 0; k < 4; ++k) {
+                line(debugImage, vertices[k], vertices[(k + 1) % 4], Scalar(255, 0, 0), 2);
+            }
+            Point2f topPoint, bottomPoint;
+            topPoint.x = newRect.center.x;
+            topPoint.y = newRect.center.y + 20;
+            bottomPoint.x = newRect.center.x;
+            bottomPoint.y = newRect.center.y - 20;
+
+            cv::Point2f newCenter(applyFiltering(newRect.center.x, newRect.center.x, 10), applyFiltering(newRect.center.y, newRect.center.y, 10));
+            RotatedRect finalRect(newSize, newCenter, newRect.angle);
+            rectangle(debugImage, topPoint, bottomPoint, Scalar(0, 120, 255), 2);
+            circle(debugImage, newCenter, 10, Scalar(0, 120, 255));
+        }
+
+        // 显示图像
+        imshow("contours", debugImage);
+        imshow("1", separatedColorsFrame);
+        imshow("2", binaryFrame);
+        imshow("3", brightBinaryImage);
+        videoWriter.write(brightBinaryImage);
+
+        if (waitKey(30) >= 0) {
+            break;
+        }
+    }
+
+    videoCapture.release();
+    videoWriter.release();
+    destroyAllWindows();
+
+    return 0;
+}
+
+
+#include <iostream>
+#include <opencv2/opencv.hpp>
+#include "include/ImageProcessingLib.hpp"
+#include "include/ArmorPlateRecognitionLib.hpp"
+#include "include/enhancement.h"
+
+int main() {
+    cv::VideoCapture videoCapture("../resourses/11.mp4");
+    if (!videoCapture.isOpened()) {
+        std::cerr << "无法打开视频文件。" << std::endl;
+        return -1;
+    }
+
+    cv::VideoWriter videoWriter("output_video.mp4", cv::VideoWriter::fourcc('M', 'P', '4', 'V'), videoCapture.get(cv::CAP_PROP_FPS), cv::Size(videoCapture.get(cv::CAP_PROP_FRAME_WIDTH), videoCapture.get(cv::CAP_PROP_FRAME_HEIGHT)));
+
+    cv::Mat frame;
+    double exposureReductionFactor = 0.3;
+    int binaryThresholdValue = 50;
+    int brightnessThreshold = 100;
+
+    // 用户输入颜色选择
+    std::cout << "请选择颜色（0：蓝色，1：红色）：";
+    int colorChoiceInput;
+    std::cin >> colorChoiceInput;
+    ColorChoice colorChoice = static_cast<ColorChoice>(colorChoiceInput);
+
+    while (true) {
+        bool readSuccess = videoCapture.read(frame);
+        if (!readSuccess) {
+            break;
+        }
+
+        // 使用新库进行透视变换和亮度对比度调整
+        std::vector<cv::Point2f> srcPoints;
+        // 设置源点
+        srcPoints.push_back(cv::Point2f(100, 100));
+        srcPoints.push_back(cv::Point2f(500, 100));
+        srcPoints.push_back(cv::Point2f(500, 500));
+        srcPoints.push_back(cv::Point2f(100, 500));
+
+        std::vector<cv::Point2f> dstPoints;
+        // 设置目标点
+        dstPoints.push_back(cv::Point2f(0, 0));
+        dstPoints.push_back(cv::Point2f(400, 0));
+        dstPoints.push_back(cv::Point2f(400, 400));
+        dstPoints.push_back(cv::Point2f(0, 400));
+
+ 
+
+        // 降低曝光
+        cv::Mat reducedExposureFrame = reduceExposure(frame, exposureReductionFactor);
+
+        // 颜色分离
+        cv::Mat separatedColorsFrame = performColorSeparation(reducedExposureFrame, colorChoice);
+
+        // 二值化
+        cv::Mat binaryFrame = performBinaryThresholding(separatedColorsFrame, binaryThresholdValue);
+
+        // 再次阈值化和膨胀处理
+        cv::Mat brightBinaryImage;
+        cv::threshold(binaryFrame, brightBinaryImage, brightnessThreshold, 255, cv::THRESH_BINARY);
+        cv::Mat structuringElement = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(3, 3));
+        cv::dilate(brightBinaryImage, brightBinaryImage, structuringElement);
+
+        // 找轮廓
+        std::vector<std::vector<cv::Point>> lightContours;
+        cv::findContours(brightBinaryImage.clone(), lightContours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+
+        // 过滤和处理轮廓
+        ArmorParameters armorParams;
+        std::vector<LightDescriptor> validLightDescriptors;
+        for (const auto& contour : lightContours) {
+            cv::RotatedRect rect = cv::minAreaRect(contour);
+            double area = cv::contourArea(contour);
+            double ratio = rect.size.width / rect.size.height;
+            double solidity = area / rect.size.area();
+            if (area >= armorParams.minLightArea &&
+                std::abs(rect.angle) <= armorParams.maxLightAngle &&
+                rect.size.width >= armorParams.minLightSize &&
+                rect.size.height >= armorParams.minLightSize &&
+                solidity >= armorParams.minLightContourSolidity &&
+                ratio <= armorParams.maxLightRatio) {
+                LightDescriptor lightDescriptor(rect);
+                validLightDescriptors.push_back(lightDescriptor);
+            }
+        }
+
+        // 识别装甲板
+        std::vector<cv::RotatedRect> armorRectangles = detectArmorPlates(validLightDescriptors);
+
+        // 绘制装甲板轮廓
+        cv::Mat debugImage = frame.clone();
+        for (const auto& rect : armorRectangles) {
+            // 调整长度为原来的二倍
+            cv::Size2f newSize(rect.size.width, rect.size.height * 2);
+            cv::RotatedRect newRect(rect.center, newSize, rect.angle);
+
+            cv::Point2f vertices[4];
+            newRect.points(vertices);
+            for (int k = 0; k < 4; ++k) {
+                cv::line(debugImage, vertices[k], vertices[(k + 1) % 4], cv::Scalar(255, 0, 0), 2);
+            }
+            cv::Point2f topPoint, bottomPoint;
+            topPoint.x = newRect.center.x;
+            topPoint.y = newRect.center.y + 20;
+            bottomPoint.x = newRect.center.x;
+            bottomPoint.y = newRect.center.y - 20;
+
+            cv::Point2f newCenter(applyFiltering(newRect.center.x, newRect.center.x, 10), applyFiltering(newRect.center.y, newRect.center.y, 10));
+            cv::RotatedRect finalRect(newSize, newCenter, newRect.angle);
+            cv::rectangle(debugImage, topPoint, bottomPoint, cv::Scalar(0, 120, 255), 2);
+            cv::circle(debugImage, newCenter, 10, cv::Scalar(0, 120, 255));
+        }
+
+        // 显示图像
+        cv::imshow("contours", debugImage);
+        cv::imshow("1", separatedColorsFrame);
+        cv::imshow("2", binaryFrame);
+        cv::imshow("3", brightBinaryImage);
+        videoWriter.write(brightBinaryImage);
+
+        if (cv::waitKey(30) >= 0) {
+            break;
+        }
+    }
+
+    videoCapture.release();
+    videoWriter.release();
+    cv::destroyAllWindows();
+
+    return 0;
+}

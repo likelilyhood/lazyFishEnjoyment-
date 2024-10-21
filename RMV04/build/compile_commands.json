@@ -1,0 +1,22 @@
+[
+{
+  "directory": "/home/pqb/RMV04/build",
+  "command": "/usr/bin/c++   -I/home/pqb/RMV04/include -isystem /usr/include/opencv4  -g   -o CMakeFiles/Main.dir/main.cpp.o -c /home/pqb/RMV04/main.cpp",
+  "file": "/home/pqb/RMV04/main.cpp"
+},
+{
+  "directory": "/home/pqb/RMV04/build",
+  "command": "/usr/bin/c++  -Denhancement_EXPORTS -I/home/pqb/RMV04/include -isystem /usr/include/opencv4  -g -fPIC   -o CMakeFiles/enhancement.dir/src/enhancement.cpp.o -c /home/pqb/RMV04/src/enhancement.cpp",
+  "file": "/home/pqb/RMV04/src/enhancement.cpp"
+},
+{
+  "directory": "/home/pqb/RMV04/build",
+  "command": "/usr/bin/c++  -DArmorPlateRecognitionLib_EXPORTS -I/home/pqb/RMV04/include -isystem /usr/include/opencv4  -g -fPIC   -o CMakeFiles/ArmorPlateRecognitionLib.dir/src/ArmorPlateRecognitionLib.cpp.o -c /home/pqb/RMV04/src/ArmorPlateRecognitionLib.cpp",
+  "file": "/home/pqb/RMV04/src/ArmorPlateRecognitionLib.cpp"
+},
+{
+  "directory": "/home/pqb/RMV04/build",
+  "command": "/usr/bin/c++  -DImageProcessingLib_EXPORTS -I/home/pqb/RMV04/include -isystem /usr/include/opencv4  -g -fPIC   -o CMakeFiles/ImageProcessingLib.dir/src/ImageProcessingLib.cpp.o -c /home/pqb/RMV04/src/ImageProcessingLib.cpp",
+  "file": "/home/pqb/RMV04/src/ImageProcessingLib.cpp"
+}
+]
